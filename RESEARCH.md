@@ -21,7 +21,8 @@ condition checked in `IOPMrootDomain::checkSystemSleepAllowed()`, in the group
 the source annotates as "conditions above pegs the system at full wake". Lid
 close goes through `privateSleepSystem(kIOPMSleepReasonClamshell)` and the same
 check, so the flag vetoes lid-close sleep, idle sleep and low-battery sleep
-alike, on battery or AC, with no display or peripheral attached.
+alike, on battery or AC, with no display or peripheral attached (by the kernel
+source; physical verification on this M4 is pending, see MANUAL_TESTING.md).
 
 **Documented? No.** `disablesleep` does not appear in `pmset(1)` on this
 machine nor in Apple's `pmset.1` source. It exists in `pmset.m`
@@ -43,15 +44,16 @@ Options for authorizing once and never per toggle:
 
 | Option | Verdict |
 |---|---|
-| A. Scoped sudoers rule for two literal `pmset` command lines | **Chosen.** No custom code runs as root; only Apple's `pmset`. One admin authorization at setup. sudo and `sudoers.d` are decades-stable and macOS includes `/etc/sudoers.d` by default. |
+| A. Scoped sudoers rule for two literal `pmset` command lines | **Chosen.** After setup, no custom code runs as root; only Apple's `pmset`. One admin authorization at setup. sudo and `sudoers.d` are decades-stable and macOS includes `/etc/sudoers.d` by default. |
 | B. `SMAppService` LaunchDaemon + XPC | Rejected. The SDK header states "Apps that contain LaunchDaemons must be notarized", which breaks local and contributor builds; it runs our code as root, needs an XPC listener with client validation, and must be re-registered after every update or move. |
 | C. Legacy LaunchDaemon helper + XPC | Rejected. Same custom root code and IPC as B, without B's system UI. |
 | D. Admin prompt on every toggle (`osascript … with administrator privileges`) | Rejected for toggling (fails the no-password-per-toggle requirement). Used only to run the one-time setup from the GUI. |
 | E. Non-root kernel selector (see §8) | Rejected for reliability. |
 | F. `SMJobBless`, `AuthorizationExecuteWithPrivileges` | Deprecated. |
 
-Chosen setup, run once as root (`sudo shutlid setup`, or the same command from
-the app through the standard macOS administrator dialog):
+Chosen setup, run once as root
+(`sudo "/Applications/Shutlid.app/Contents/MacOS/shutlid" setup`, or the same
+command from the app through the standard macOS administrator dialog):
 
 1. `/etc/sudoers.d/shutlid` (root:wheel, 0440, validated with `visudo -cf`
    before installing):
@@ -65,6 +67,11 @@ Afterwards the app and the CLI run `sudo -k -n /usr/bin/pmset disablesleep 1|0`
 (`-k` ignores any cached sudo credential, so the call succeeds only through the
 rule and never by accident). No password is ever seen, stored or piped by this
 project.
+
+Signing: the chosen path needs no entitlements or notarization to function; an
+ad-hoc-signed local build works. Developer ID signing plus notarization is only
+needed so a downloaded build opens without a Gatekeeper override
+(`scripts/build.sh --notarize`).
 
 ## 3. Network with the lid closed
 
@@ -95,16 +102,17 @@ Consequences to state plainly:
   the flag persists. Sleepless reports it resets on macOS 26.3. Either way the
   boot-reset LaunchDaemon guarantees normal sleep after any restart without
   opening the app; running `disablesleep 0` when it is already 0 is a no-op.
-- **App quit.** The app releases the flag before exiting and logs it. The
-  persisted request is kept only when "restore previous state" is on, so it can
-  be re-applied at the next login.
+- **App quit (Quit menu).** Releases the flag and clears the request; a normal
+  turn-off, logged with `source: quit`.
+- **Logout / shutdown / restart.** The session terminates the app; it releases
+  the flag on the way down and keeps the persisted request only when "restore
+  previous state" is on, so it can be re-applied at the next login. A hard kill
+  skips the release and leaves the flag until reboot.
 - **App crash.** The flag stays set and auto-off cannot fire until the app runs
   again (it re-checks the deadline at launch), `shutlid off` is run, or the Mac
   reboots. Documented as the known gap.
 - **CLI crash.** Nothing lives in the CLI.
 - **Helper crash.** There is no helper.
-- **Logout.** The app is terminated by the session; its termination path turns
-  keep-awake off. A hard kill leaves the flag until reboot.
 - **OS update.** Ends in a reboot, which resets. `sudoers.d` and
   `/Library/LaunchDaemons` live on the data volume and survive updates. If a
   future macOS removes `disablesleep`, `on` fails loudly and `status` reports
@@ -135,7 +143,7 @@ Consequences to state plainly:
 | `sudo`, `/etc/sudoers.d`, launchd plists, `/usr/bin/pmset` | Unix-stable | Negligible. |
 | `IOPMrootDomain` `SleepDisabled` property (read) | Same lifetime as the flag | Same as above. |
 | `SMAppService.mainApp` login item | Documented, macOS 13+ | Low. |
-| `IOPSNotificationCreateRunLoopSource` (AC/battery events) | Documented | Low. |
+| `kIOPSNotifyPowerSource` Darwin notification via `notify_register_dispatch` (AC/battery events) | Documented (IOKit/ps/IOPSKeys.h, notify(3)) | Low. |
 | macOS "Background Items" UI (13+) | Lists the boot-reset daemon (display name to be recorded in the manual test); a user can disable it | If disabled, the boot reset does not run. Documented. |
 
 Supported: macOS 14 and later (SMAppService is 13+; tested on 27 beta).
@@ -179,24 +187,27 @@ Supported: macOS 14 and later (SMAppService is 13+; tested on 27 beta).
    window. Owns the single auto-off timer, the Settings window, launch at login
    (`SMAppService.mainApp`), and the AC/battery listener for the optional
    power mode.
-2. `shutlid` CLI: `on`, `off`, `status`, `setup`. Ships inside the app bundle;
+2. `shutlid` CLI: `on [--for <hours>]`, `off`, `status`, `setup`, `log`,
+   `--version`, `--help`. Ships inside the app bundle;
    `/usr/local/bin/shutlid` is a symlink. `on` launches the app if it is not
    running so the auto-off timer exists.
 3. `ShutlidCore`: one small library shared by both. `PowerController.swift` is
    the only file that runs `pmset` or touches IOKit. Also: settings
    (`UserDefaults` suite), status text, `os_log` events.
 4. Two root-owned data files installed by `setup`: the sudoers rule and the
-   boot-reset launchd plist. No code runs as root except Apple's `pmset`.
+   boot-reset launchd plist. After setup, no code runs as root except Apple's
+   `pmset`.
 
-Resident processes: one (the app), and only while it runs. No daemon, no XPC,
-no helper, no IPC beyond a Darwin notification (`notify_post`) the CLI posts so
-the app refreshes its icon immediately.
+Resident processes: one (the app), and only while it runs. No resident daemon,
+no XPC, no helper: the boot-reset LaunchDaemon runs `pmset disablesleep 0` once
+at boot and exits. No IPC beyond a Darwin notification (`notify_post`) the CLI
+posts so the app refreshes its icon immediately.
 
 **Components rejected**: XPC service, privileged helper, SMAppService daemon,
 database, service layer, dependency injection, networking, updater, analytics,
 any Swift package dependency.
 
-**Privilege model**: root only through `sudo -n /usr/bin/pmset disablesleep 1|0`
+**Privilege model**: root only through `sudo -k -n /usr/bin/pmset disablesleep 1|0`
 permitted by the scoped rule. Setup needs one admin authorization. The app and
 the CLI never see a password.
 
@@ -211,8 +222,9 @@ from the kernel every time; nothing reconciles it.
 |---|---|
 | Setup not done, `on` called | `sudo -n` refuses; `on` prints how to run setup, exits non-zero. Mac keeps normal sleep. |
 | `pmset` fails or `disablesleep` removed by Apple | `on` reports the error; `status` shows `Effective: OFF`. |
-| App crash while ON | Flag stays until `off`, next app launch, or reboot. Auto-off does not fire. Documented. |
-| App quit / logout | Releases the flag first. Keeps the request only when "restore previous state" is on. |
+| App crash while ON | Flag stays until `off` or reboot; the next app launch re-arms auto-off (and turns off at once if the deadline already passed). Auto-off does not fire meanwhile. Documented. |
+| App quit | Releases the flag and clears the request. |
+| Logout / shutdown | Releases the flag first; keeps the request only when "restore previous state" is on. |
 | Reboot | Boot reset turns OFF. With "restore previous state" on, the app re-enables at login with a fresh deadline. |
 | Deadline passes while app not running | Next launch of the app or `status` shows it expired; app turns OFF at launch. |
 | Boot-reset daemon disabled by user in System Settings | Flag may persist a reboot; `status` shows reality. Documented. |
