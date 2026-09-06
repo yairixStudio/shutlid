@@ -30,7 +30,7 @@ public struct Status {
     /// Exactly four lines, labels padded to 12 columns, no trailing newline.
     public func cliText(now: Date) -> String {
         let effectiveText: String
-        if requested && !effective && mode == .onlyOnPower && !onAC {
+        if waitingForPower {
             effectiveText = "OFF (on battery; mode: only while connected to power)"
         } else if requested && !effective {
             effectiveText = "OFF (not applied; run 'shutlid on' again)"
@@ -44,7 +44,7 @@ public struct Status {
             line("Requested:", requested ? "ON" : "OFF"),
             line("Effective:", effectiveText),
             line("Mode:", modeText),
-            line("Auto-off:", autoOffText(now: now)),
+            line("Auto-off:", autoOffLine(now: now)),
         ].joined(separator: "\n")
     }
 
@@ -68,8 +68,13 @@ public struct Status {
         return "\(minutes)m"
     }
 
-    private func autoOffText(now: Date) -> String {
-        guard let deadline else { return Log.autoOffText(hours: autoOffHours) }
+    /// "24h", or "never" for 0. Used by the status text, the menu and the log.
+    public static func autoOffText(hours: Int) -> String {
+        hours == 0 ? "never" : "\(hours)h"
+    }
+
+    private func autoOffLine(now: Date) -> String {
+        guard let deadline else { return Self.autoOffText(hours: autoOffHours) }
         if deadline > now { return "in \(Self.remainingText(until: deadline, now: now))" }
         return "expired"
     }

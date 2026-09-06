@@ -2,11 +2,13 @@ import XCTest
 @testable import ShutlidCore
 
 final class KeepAwakeTests: XCTestCase {
+    /// One fixed suite for the whole class: cfprefsd keeps an (empty) plist per suite name it has seen.
+    private static let suite = "com.yairix.shutlid.tests"
     private let start = Date(timeIntervalSince1970: 1_700_000_000)
     private var clock = Date(timeIntervalSince1970: 1_700_000_000)
     private var onAC = true
     private var setupInstalled = true
-    private var suite = ""
+    private var bootSession = "boot-A"
     private var defaults: UserDefaults!
     private var power: FakePower!
     private var keepAwake: KeepAwake!
@@ -16,28 +18,33 @@ final class KeepAwakeTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        suite = "test-\(UUID().uuidString)"
-        defaults = UserDefaults(suiteName: suite)
+        defaults = UserDefaults(suiteName: Self.suite)
+        defaults.removePersistentDomain(forName: Self.suite)
         power = FakePower()
         clock = start
         onAC = true
         setupInstalled = true
+        bootSession = "boot-A"
         keepAwake = KeepAwake(power: power, defaults: defaults,
                               isOnAC: { [unowned self] in onAC },
                               isSetupInstalled: { [unowned self] in setupInstalled },
+                              bootSession: { [unowned self] in bootSession },
                               now: { [unowned self] in clock })
     }
 
     override func tearDown() {
-        defaults.removePersistentDomain(forName: suite)
-        // cfprefsd writes an empty plist for the cleared domain a moment later; flush it first, then delete it.
-        defaults.synchronize()
-        try? FileManager.default.removeItem(atPath: NSHomeDirectory() + "/Library/Preferences/\(suite).plist")
+        defaults.removePersistentDomain(forName: Self.suite)
         super.tearDown()
     }
 
     private func hours(_ hours: Double, from date: Date? = nil) -> Date {
         (date ?? start).addingTimeInterval(hours * 3600)
+    }
+
+    /// Simulates a restart: the boot reset cleared the flag and the boot session is new.
+    private func reboot() {
+        power.flag = false
+        bootSession = "boot-B"
     }
 
     // MARK: - turnOn
@@ -130,14 +137,14 @@ final class KeepAwakeTests: XCTestCase {
         XCTAssertEqual(power.calls, [true, false])
     }
 
-    func testTurnOffFailureClearsRequestKeepsDeadline() throws {
+    func testTurnOffFailureClearsRequestAndDeadline() throws {
         try keepAwake.turnOn(source: .cli)
         power.error = commandFailed
         XCTAssertThrowsError(try keepAwake.turnOff(source: .cli))
         let status = keepAwake.status()
         XCTAssertFalse(status.requested)
-        XCTAssertTrue(status.effective)
-        XCTAssertEqual(status.deadline, hours(24), "kept so the app timer retries")
+        XCTAssertTrue(status.effective, "the kernel flag is still set; the status text says so")
+        XCTAssertNil(status.deadline)
     }
 
     func testTurnOffSetupRequiredWithFlagOffSucceeds() throws {
@@ -170,11 +177,11 @@ final class KeepAwakeTests: XCTestCase {
         }
     }
 
-    func testApplyModeOnlyOnPowerBatteryRemovesFlagAndKeepsDeadline() throws {
+    func testPowerSourceChangedOnlyOnPowerBatteryRemovesFlagAndKeepsDeadline() throws {
         keepAwake.settings.mode = .onlyOnPower
         try keepAwake.turnOn(source: .cli, hours: 4)
         onAC = false
-        try keepAwake.applyMode()
+        try keepAwake.powerSourceChanged()
         let status = keepAwake.status()
         XCTAssertEqual(power.calls, [true, false])
         XCTAssertFalse(status.effective)
@@ -182,31 +189,32 @@ final class KeepAwakeTests: XCTestCase {
         XCTAssertEqual(status.deadline, hours(4))
     }
 
-    func testApplyModeOnlyOnPowerACAppliesFlag() throws {
+    func testPowerSourceChangedOnlyOnPowerACAppliesFlag() throws {
         keepAwake.settings.mode = .onlyOnPower
         onAC = false
         try keepAwake.turnOn(source: .cli)
         onAC = true
-        try keepAwake.applyMode()
+        try keepAwake.powerSourceChanged()
         XCTAssertEqual(power.calls, [true])
         XCTAssertTrue(keepAwake.status().effective)
     }
 
-    func testApplyModeAlwaysNeverTouchesFlag() throws {
+    func testPowerSourceChangedAlwaysNeverTouchesFlag() throws {
         try keepAwake.turnOn(source: .cli)
+        power.flag = false  // cleared by hand with pmset: not ours to re-apply
         onAC = false
-        try keepAwake.applyMode()
+        try keepAwake.powerSourceChanged()
         onAC = true
-        try keepAwake.applyMode()
+        try keepAwake.powerSourceChanged()
         XCTAssertEqual(power.calls, [true])
     }
 
-    func testApplyModeDoesNothingWhenNotRequested() throws {
+    func testPowerSourceChangedDoesNothingWhenNotRequested() throws {
         keepAwake.settings.mode = .onlyOnPower
         onAC = false
-        try keepAwake.applyMode()
+        try keepAwake.powerSourceChanged()
         onAC = true
-        try keepAwake.applyMode()
+        try keepAwake.powerSourceChanged()
         XCTAssertEqual(power.calls, [])
     }
 
@@ -219,6 +227,15 @@ final class KeepAwakeTests: XCTestCase {
         XCTAssertTrue(status.requested)
         XCTAssertFalse(status.effective)
         XCTAssertEqual(status.deadline, hours(24))
+    }
+
+    func testSettingsModeChangeToAlwaysWhileWaitingAppliesFlag() throws {
+        keepAwake.settings.mode = .onlyOnPower
+        onAC = false
+        try keepAwake.turnOn(source: .gui)
+        keepAwake.settings.mode = .always
+        XCTAssertEqual(power.calls, [true])
+        XCTAssertTrue(keepAwake.status().effective)
     }
 
     // MARK: - Settings
@@ -267,10 +284,22 @@ final class KeepAwakeTests: XCTestCase {
         XCTAssertNil(status.deadline)
     }
 
-    func testApplyAtLaunchRestoreOnReappliesWithFreshDeadline() throws {
+    func testApplyAtLaunchExpiredWinsOverRestore() throws {
+        keepAwake.settings.restoreAfterRestart = true
+        try keepAwake.turnOn(source: .cli, hours: 1)
+        reboot()
+        clock = hours(2)
+        try keepAwake.applyAtLaunch()
+        let status = keepAwake.status()
+        XCTAssertEqual(power.calls, [true, false], "an expired request is not restored")
+        XCTAssertFalse(status.requested)
+        XCTAssertNil(status.deadline)
+    }
+
+    func testApplyAtLaunchAfterRebootRestoreOnReappliesWithFreshDeadline() throws {
         keepAwake.settings.restoreAfterRestart = true
         try keepAwake.turnOn(source: .cli, hours: 4)
-        power.flag = false  // the boot reset ran
+        reboot()
         clock = hours(1)
         try keepAwake.applyAtLaunch()
         let status = keepAwake.status()
@@ -280,10 +309,10 @@ final class KeepAwakeTests: XCTestCase {
         XCTAssertEqual(status.deadline, hours(24, from: clock))
     }
 
-    func testApplyAtLaunchRestoreOnDefersOnBattery() throws {
+    func testApplyAtLaunchAfterRebootRestoreOnDefersOnBattery() throws {
         keepAwake.settings = Settings(mode: .onlyOnPower, autoOffHours: 8, restoreAfterRestart: true)
         try keepAwake.turnOn(source: .cli)
-        power.flag = false
+        reboot()
         onAC = false
         clock = hours(1)
         try keepAwake.applyAtLaunch()
@@ -294,14 +323,48 @@ final class KeepAwakeTests: XCTestCase {
         XCTAssertEqual(status.deadline, hours(8, from: clock))
     }
 
-    func testApplyAtLaunchRestoreOffClearsStaleRequest() throws {
+    func testApplyAtLaunchAfterRebootRestoreOffClearsStaleRequest() throws {
         try keepAwake.turnOn(source: .cli)
-        power.flag = false
+        reboot()
         try keepAwake.applyAtLaunch()
         let status = keepAwake.status()
         XCTAssertEqual(power.calls, [true], "nothing is re-applied and nothing is released")
         XCTAssertFalse(status.requested)
         XCTAssertNil(status.deadline)
+    }
+
+    func testApplyAtLaunchAfterRebootOnBatteryPowerOnlyClearsStaleRequest() throws {
+        keepAwake.settings.mode = .onlyOnPower
+        try keepAwake.turnOn(source: .cli)
+        reboot()
+        onAC = false
+        try keepAwake.applyAtLaunch()
+        XCTAssertEqual(power.calls, [true])
+        XCTAssertFalse(keepAwake.status().requested, "a stale request must not survive a reboot in power-only mode")
+    }
+
+    func testApplyAtLaunchSameBootKeepsDeferredRequest() throws {
+        // `shutlid on` on battery in power-only mode launches the app; the app must not treat the deferred
+        // request as a stale one.
+        keepAwake.settings.mode = .onlyOnPower
+        onAC = false
+        try keepAwake.turnOn(source: .cli, hours: 4)
+        try keepAwake.applyAtLaunch()
+        let status = keepAwake.status()
+        XCTAssertEqual(power.calls, [])
+        XCTAssertTrue(status.requested)
+        XCTAssertEqual(status.deadline, hours(4))
+        onAC = true
+        try keepAwake.powerSourceChanged()
+        XCTAssertEqual(power.calls, [true])
+    }
+
+    func testApplyAtLaunchSameBootManualResetClearsRequest() throws {
+        try keepAwake.turnOn(source: .cli)
+        power.flag = false  // `sudo pmset disablesleep 0` by hand, then the app relaunched
+        try keepAwake.applyAtLaunch()
+        XCTAssertEqual(power.calls, [true])
+        XCTAssertFalse(keepAwake.status().requested)
     }
 
     func testApplyAtLaunchCrashCaseUntouched() throws {

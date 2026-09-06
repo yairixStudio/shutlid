@@ -1,6 +1,6 @@
 import os
 
-/// The whole log: five event kinds, all interpolations public (otherwise `log show` prints `<private>`).
+/// The whole log: four event kinds, all interpolations public (otherwise `log show` prints `<private>`).
 public enum Log {
     private static let logger = Logger(subsystem: Shutlid.logSubsystem, category: "events")
 
@@ -18,14 +18,10 @@ public enum Log {
     }
 
     public static func settingsChanged(_ settings: Settings) {
-        logger.notice("settings changed: mode=\(settings.mode.rawValue, privacy: .public), autoOff=\(autoOffText(hours: settings.autoOffHours), privacy: .public), restoreAfterRestart=\(settings.restoreAfterRestart, privacy: .public)")
+        logger.notice("settings changed: mode=\(settings.mode.rawValue, privacy: .public), autoOff=\(Status.autoOffText(hours: settings.autoOffHours), privacy: .public), restoreAfterRestart=\(settings.restoreAfterRestart, privacy: .public)")
     }
 
     public static func failure(_ detail: String) {
         logger.error("power operation failed: \(detail, privacy: .public)")
-    }
-
-    static func autoOffText(hours: Int) -> String {
-        hours == 0 ? "never" : "\(hours)h"
     }
 }

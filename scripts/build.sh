@@ -27,6 +27,13 @@ if [ -z "$version" ]; then
     exit 1
 fi
 
+identity=${SIGN_IDENTITY:--}
+profile=${NOTARY_PROFILE:-shutlid}
+if $notarize && [ "$identity" = "-" ]; then
+    echo "error: --notarize needs a Developer ID in SIGN_IDENTITY" >&2
+    exit 1
+fi
+
 # SWIFT_BUILD_ARGS is intentionally unquoted so it can hold several arguments.
 # shellcheck disable=SC2086
 swift build -c release --arch arm64 ${SWIFT_BUILD_ARGS:-}
@@ -44,7 +51,6 @@ sed "s/__VERSION__/$version/g" Resources/Info.plist > "$app/Contents/Info.plist"
 printf 'APPL????' > "$app/Contents/PkgInfo"
 cp Resources/AppIcon.icns "$app/Contents/Resources/AppIcon.icns"
 
-identity=${SIGN_IDENTITY:--}
 sign_flags=(--force)
 if [ "$identity" != "-" ]; then
     sign_flags+=(--options runtime --timestamp)
@@ -55,31 +61,26 @@ codesign --sign "$identity" "${sign_flags[@]}" "$app"
 codesign --verify --deep --strict "$app"
 echo "built $app (version $version, signed with '$identity')"
 
+if $notarize; then
+    # notarytool takes a zip or a dmg, never a bare .app. The app is stapled first, so a dmg made
+    # afterwards carries a stapled app that opens offline.
+    zip=dist/Shutlid-notarize.zip
+    ditto -c -k --keepParent "$app" "$zip"
+    xcrun notarytool submit "$zip" --wait --keychain-profile "$profile"
+    rm -f "$zip"
+    xcrun stapler staple "$app"
+    echo "notarized and stapled $app"
+fi
+
 if $make_dmg; then
     dmg="dist/Shutlid-$version.dmg"
     hdiutil create -volname Shutlid -srcfolder "$app" -ov -format UDZO "$dmg"
     if [ "$identity" != "-" ]; then
         codesign --sign "$identity" --force --timestamp "$dmg"
     fi
+    if $notarize; then
+        xcrun notarytool submit "$dmg" --wait --keychain-profile "$profile"
+        xcrun stapler staple "$dmg"
+    fi
     echo "built $dmg"
-fi
-
-if $notarize; then
-    if [ "$identity" = "-" ]; then
-        echo "error: --notarize needs a Developer ID in SIGN_IDENTITY" >&2
-        exit 1
-    fi
-    # notarytool accepts a dmg or a zip, not a bare .app; the ticket is stapled to the app itself.
-    target=$app
-    upload=dist/Shutlid-notarize.zip
-    if $make_dmg; then
-        target=$dmg
-        upload=$dmg
-    else
-        ditto -c -k --keepParent "$app" "$upload"
-    fi
-    xcrun notarytool submit "$upload" --wait --keychain-profile "${NOTARY_PROFILE:-shutlid}"
-    xcrun stapler staple "$target"
-    rm -f dist/Shutlid-notarize.zip
-    echo "notarized and stapled $target"
 fi

@@ -12,11 +12,9 @@ public struct SetupError: Error, CustomStringConvertible {
 /// the scoped sudoers rule, the boot-time reset daemon and the CLI symlink. Re-runnable.
 public enum Setup {
     private static let sudoersTempPath = "/etc/sudoers.d/.shutlid.tmp"  // dotted names are ignored by sudo
-    private static let cliPathSuffix = ".app/Contents/MacOS/shutlid"
 
     public static var sudoersLine: String {
-        "%admin ALL=(root) NOPASSWD: " + PowerController.enableCommand.joined(separator: " ")
-            + ", " + PowerController.disableCommand.joined(separator: " ")
+        "%admin ALL=(root) NOPASSWD: " + PowerController.ruleCommands
     }
 
     public static func resetDaemonPlist() -> String {
@@ -44,28 +42,30 @@ public enum Setup {
         """
     }
 
-    /// True when the current user may run the enable command without a password. Never prompts (`-n`).
+    /// True when the current user has the password-less rule. Never prompts.
     public static func isInstalled() -> Bool {
-        runCommand("/usr/bin/sudo", ["-k", "-n", "-l"] + PowerController.enableCommand).status == 0
+        PowerController.hasPasswordlessRule()
     }
 
     /// Must run as root from the CLI inside Shutlid.app. Prints each installed path; never reads a password.
     public static func install(cliPath: String) throws {
-        guard cliPath.hasSuffix(cliPathSuffix) else {
+        guard let bundlePath = Shutlid.bundlePath(ofCLI: cliPath) else {
             throw SetupError("run setup from the shutlid binary inside \(Shutlid.appName).app")
+        }
+        // Gatekeeper runs a downloaded, unmoved app from a temporary path that vanishes when the app quits.
+        guard !cliPath.contains("/AppTranslocation/") else {
+            throw SetupError("move \(Shutlid.appName).app to /Applications first, then run setup again")
         }
         guard getuid() == 0 else {
             throw SetupError("Run: sudo \"\(cliPath)\" setup")
         }
-        // Three parents up from Shutlid.app/Contents/MacOS/shutlid is the bundle.
-        let bundleURL = URL(fileURLWithPath: cliPath)
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        if !bundleURL.path.hasPrefix("/Applications/") {
+        if !bundlePath.hasPrefix("/Applications/") {
             print("warning: \(Shutlid.appName).app is not in /Applications; moving it later means running setup again.")
         }
-        try installSudoers()
+        // The rule that grants the privilege goes last: a failure before it leaves nothing privileged behind.
         try installResetDaemon()
         try installSymlink(cliPath: cliPath)
+        try installSudoers()
         verifyAsInvokingUser()
     }
 
@@ -126,12 +126,11 @@ public enum Setup {
     private static func verifyAsInvokingUser() {
         let consoleUser = runCommand("/usr/bin/stat", ["-f%Su", "/dev/console"]).stdout.trimmed
         let user = ProcessInfo.processInfo.environment["SUDO_USER"] ?? consoleUser
-        let listArguments = ["-k", "-n", "-l"] + PowerController.enableCommand
-        let check = runCommand("/usr/bin/sudo", ["-u", user, "/usr/bin/sudo"] + listArguments)
-        if check.status == 0 {
+        let listing = runCommand("/usr/bin/sudo", ["-u", user, "/usr/bin/sudo"] + PowerController.listRulesArguments)
+        if PowerController.listsRule(listing) {
             print("Setup complete.")
         } else {
-            print("warning: could not confirm the sudo rule for \(user). Check by hand as that user: sudo \(listArguments.joined(separator: " "))")
+            print("warning: could not confirm the sudo rule for \(user). Check as that user with: sudo -l")
         }
     }
 

@@ -7,14 +7,14 @@ import ShutlidCore
 // Resolving symlinks turns /usr/local/bin/shutlid into the binary inside Shutlid.app.
 let executable = Bundle.main.executableURL!.resolvingSymlinksInPath()
 let ownPath = executable.path
-/// Shutlid.app when this binary runs from inside it (three parents up), else nil.
-let bundlePath: String? = ownPath.hasSuffix(".app/Contents/MacOS/shutlid")
-    ? executable.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().path
-    : nil
+/// Shutlid.app when this binary runs from inside it, else nil.
+let bundlePath = Shutlid.bundlePath(ofCLI: ownPath)
+/// Setup only works from inside the app, so point at the installed app when running from elsewhere.
+let setupPath = bundlePath == nil ? Shutlid.installedCLIPath : ownPath
 
 let usage = """
     Usage:
-      shutlid on [--for <hours>]   keep the Mac awake, lid closed or not (--for: 1-720, overrides Auto-off)
+      shutlid on [--for <hours>]   keep the Mac awake, lid closed or not (--for: \(Command.forHoursRange.lowerBound)-\(Command.forHoursRange.upperBound), overrides Auto-off)
       shutlid off                  return to normal sleep
       shutlid status               show what was requested and what macOS is actually doing
       shutlid setup                one-time install of the privileged rule (run as root, see --help)
@@ -37,8 +37,8 @@ let helpText = """
     read `status` for the effective state. Auto-off (default 24h) is enforced by
     \(Shutlid.appName).app, which `on` launches in the background.
 
-    Setup (once, needs an administrator password):
-      sudo "\(ownPath)" setup
+    Setup (once, needs an administrator password; run from the installed app):
+      sudo "\(setupPath)" setup
 
     Agent example:
       User:  Keep my Mac awake, I'm closing the lid.
@@ -48,7 +48,7 @@ let helpText = """
       Agent: shutlid off
     """
 
-let keepAwake = KeepAwake(defaults: UserDefaults(suiteName: Shutlid.defaultsSuite)!)
+let keepAwake = KeepAwake()
 
 func printError(_ text: String) {
     FileHandle.standardError.write(Data((text + "\n").utf8))
@@ -61,26 +61,18 @@ func printStatus() {
 /// Prints the error and returns the exit code: 2 means "run setup", 1 anything else.
 func report(_ error: Error) -> Int32 {
     if let power = error as? PowerError, power.kind == .setupRequired {
-        printError("Setup required. Run once: sudo \"\(ownPath)\" setup")
+        printError("Setup required. Run once: sudo \"\(setupPath)\" setup")
         return 2
     }
-    printError("error: \(String(describing: error))")
+    printError("error: \(error)")
     return 1
 }
 
 /// `open -g` starts the app in the background (or does nothing if it already runs) without stealing focus.
 func launchApp() -> Bool {
-    let process = Process()
-    process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-    process.arguments = bundlePath.map { ["-g", $0] } ?? ["-g", "-b", Shutlid.bundleIdentifier]
-    process.standardInput = FileHandle.nullDevice
-    do {
-        try process.run()
-    } catch {
-        return false
-    }
-    process.waitUntilExit()
-    return process.terminationStatus == 0
+    let result = runCommand("/usr/bin/open", bundlePath.map { ["-g", $0] } ?? ["-g", "-b", Shutlid.bundleIdentifier])
+    if result.status != 0 { printError(result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)) }
+    return result.status == 0
 }
 
 func turnOn(hours: Int?) -> Int32 {
@@ -90,7 +82,7 @@ func turnOn(hours: Int?) -> Int32 {
         return report(error)
     }
     if launchApp() { return 0 }
-    if (hours ?? keepAwake.settings.autoOffHours) == 0 {
+    if keepAwake.status().deadline == nil {
         printError("warning: \(Shutlid.appName).app could not be launched; no auto-off was requested, continuing")
         return 0
     }
@@ -98,7 +90,7 @@ func turnOn(hours: Int?) -> Int32 {
     do {
         try keepAwake.turnOff(source: .cli)
     } catch {
-        printError("error: \(String(describing: error))")
+        printError("error: \(error)")
     }
     printError("error: \(Shutlid.appName).app could not be launched; auto-off cannot be enforced")
     return 1
@@ -126,9 +118,21 @@ let command: Command
 switch Command.parse(Array(CommandLine.arguments.dropFirst())) {
 case .success(let parsed):
     command = parsed
-case .failure(let message):
-    printError("error: \(message)\n\(usage)")
+case .failure(let error):
+    printError("error: \(error)\n\(usage)")
     exit(1)
+}
+
+// Root keeps its own preferences and needs no sudo rule, so `sudo shutlid on` would set the flag with
+// nothing ever turning it off. Only setup runs as root.
+switch command {
+case .on, .off, .status:
+    if getuid() == 0 {
+        printError("error: run shutlid as your normal user, not with sudo; only 'setup' needs root")
+        exit(1)
+    }
+default:
+    break
 }
 
 switch command {

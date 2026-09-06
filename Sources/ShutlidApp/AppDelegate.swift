@@ -4,17 +4,13 @@ import ShutlidCore
 
 /// The status item, its menu, the single auto-off timer, and the app's start and end.
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
-    private let keepAwake = KeepAwake(defaults: UserDefaults(suiteName: Shutlid.defaultsSuite)!)
+    private let keepAwake = KeepAwake()
     private lazy var statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let menu = NSMenu()
     private var settingsWindow: SettingsWindow?
     private var autoOffTimer: DispatchSourceTimer?
-    /// A deadline whose auto-off already failed. refresh() does not schedule it again, so a failing
-    /// turn-off cannot loop through its own change notification; a new Turn On brings a new deadline.
-    private var failedDeadline: Date?
+    private var terminationSignal: DispatchSourceSignal?
     private var released = false
-    private var changedToken: Int32 = 0
-    private var powerToken: Int32 = 0
 
     // MARK: - Launch and termination
 
@@ -24,17 +20,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem.menu = menu
         try? keepAwake.applyAtLaunch()  // failures are logged by the core; the icon and menu show reality
         refresh()
-        notify_register_dispatch(Shutlid.changedNotification, &changedToken, .main) { [weak self] _ in
+        var token: Int32 = 0
+        notify_register_dispatch(Shutlid.changedNotification, &token, .main) { [weak self] _ in
             self?.refresh()
         }
-        // Second guard: the wall timer should fire on wake anyway; a refresh also catches a deadline passed during sleep.
+        // Second guard: the wall-clock timer fires on wake anyway; a refresh also catches a deadline passed during sleep.
         NSWorkspace.shared.notificationCenter.addObserver(
             self, selector: #selector(refresh), name: NSWorkspace.didWakeNotification, object: nil)
-        powerToken = PowerSource.observeChanges { [weak self] in
+        PowerSource.observeChanges { [weak self] in
             guard let self else { return }
-            try? self.keepAwake.applyMode()  // failures are logged by the core
+            try? self.keepAwake.powerSourceChanged()  // failures are logged by the core
             self.refresh()
         }
+        // kill/pkill (SIGTERM) ends the app through the normal path, so the flag is released as on Quit.
+        signal(SIGTERM, SIG_IGN)
+        let signalSource = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+        signalSource.setEventHandler { NSApp.terminate(nil) }
+        signalSource.resume()
+        terminationSignal = signalSource
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -66,22 +69,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem.button?.image = icon(for: status)
         autoOffTimer?.cancel()
         autoOffTimer = nil
-        guard let deadline = status.deadline, deadline != failedDeadline else { return }
+        guard let deadline = status.deadline else { return }
         let timer = DispatchSource.makeTimerSource(queue: .main)
         // Wall clock, not mach time: mach time stops while the Mac sleeps. A past deadline fires immediately.
         timer.schedule(wallDeadline: .now() + deadline.timeIntervalSinceNow, leeway: .seconds(30))
-        timer.setEventHandler { [weak self] in self?.autoOff(at: deadline) }
+        timer.setEventHandler { [weak self] in self?.autoOff() }
         timer.resume()
         autoOffTimer = timer
     }
 
-    private func autoOff(at deadline: Date) {
+    private func autoOff() {
         do {
             try keepAwake.turnOff(source: .autoOff)
         } catch {
-            // The core kept the deadline and logged the failure. Remember it before the alert: the change
-            // notification arrives during the modal alert and must not reschedule the same deadline.
-            failedDeadline = deadline
+            // The core cleared the request and the deadline, so the timer is not rescheduled.
             showTurnOffFailure(error)
         }
     }
@@ -96,7 +97,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return NSImage(systemSymbolName: "moon.zzz", accessibilityDescription: "Shutlid: normal sleep")
     }
 
-    func menuWillOpen(_ menu: NSMenu) {
+    /// AppKit's hook for populating a menu at the start of each tracking session.
+    func menuNeedsUpdate(_ menu: NSMenu) {
         let status = keepAwake.status()
         menu.removeAllItems()
         menu.addItem(withTitle: status.menuTitle(now: Date()), action: nil, keyEquivalent: "").isEnabled = false
@@ -149,6 +151,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: - One-time setup through the standard administrator dialog
 
     private func runSetupThenTurnOn() {
+        // Setup links the command line to this bundle's location, so the app must already be where it will stay.
+        guard Bundle.main.bundleURL.path.hasPrefix("/Applications/") else {
+            showAlert("Move \(Shutlid.appName) to the Applications folder first.",
+                      "Setup installs a command-line link to the app's location. Move \(Shutlid.appName).app "
+                          + "to /Applications, open it from there, and turn on again.")
+            return
+        }
         let alert = NSAlert()
         alert.messageText = "Shutlid needs a one-time administrator authorization "
             + "to install a scoped sudo rule and a boot-time reset."

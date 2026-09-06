@@ -41,6 +41,6 @@ final class CommandTests: XCTestCase {
         assertFails(["ON"])
         assertFails(["off", "now"])
         assertFails(["status", "--for", "4"])
-        XCTAssertEqual(Command.parse(["frobnicate"]), .failure("unknown command 'frobnicate'"))
+        XCTAssertEqual(Command.parse(["frobnicate"]), .failure(UsageError("unknown command 'frobnicate'")))
     }
 }

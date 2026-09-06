@@ -36,8 +36,12 @@ public struct PowerController: PowerControlling {
     /// boot-reset plist from these two arrays.
     public static let enableCommand = ["/usr/bin/pmset", "disablesleep", "1"]
     public static let disableCommand = ["/usr/bin/pmset", "disablesleep", "0"]
+    /// The command part of the sudoers rule, exactly as `sudo -l` prints it back.
+    public static let ruleCommands = enableCommand.joined(separator: " ") + ", " + disableCommand.joined(separator: " ")
     /// What a person types to reset the flag by hand when everything else failed.
     public static let manualResetCommand = "sudo pmset disablesleep 0"
+    /// `sudo -l` with these flags lists the caller's rules and never prompts (`-n`); `-k` ignores cached credentials.
+    public static let listRulesArguments = ["-k", "-n", "-l"]
 
     /// sudo prints one of these when no rule permits the command. The text is stable and not localised.
     private static let setupRequiredMarkers = ["a password is required", "not allowed", "may not run"]
@@ -66,6 +70,17 @@ public struct PowerController: PowerControlling {
         }
     }
 
+    /// True when `sudo -l` lists the exact password-less rule for the current user. Merely being permitted
+    /// to run the command is not enough: an admin's password-requiring rule permits it too. Never prompts.
+    public static func hasPasswordlessRule() -> Bool {
+        listsRule(runCommand("/usr/bin/sudo", listRulesArguments))
+    }
+
+    /// Whether a `sudo -l` listing contains the rule that setup installs.
+    public static func listsRule(_ listing: CommandResult) -> Bool {
+        listing.status == 0 && listing.stdout.contains("NOPASSWD: " + ruleCommands)
+    }
+
     /// `-k` is required: without it a sudo credential cached by an earlier `sudo` in the same terminal
     /// would let the command succeed with no rule installed, and a later `off` would then fail.
     private func runPrivileged(_ command: [String]) -> CommandResult {
@@ -81,26 +96,25 @@ public enum PowerSource {
         return (type as String) == kIOPMACPowerKey
     }
 
-    /// Calls `handler` on the main queue whenever the providing power source changes. Event based, no polling.
-    /// Returns the notify token; the caller keeps it for the life of the process.
-    public static func observeChanges(_ handler: @escaping () -> Void) -> Int32 {
+    /// Calls `handler` on the main queue whenever the providing power source changes, for the life of
+    /// the process. Event based, no polling.
+    public static func observeChanges(_ handler: @escaping () -> Void) {
         var token: Int32 = 0
         notify_register_dispatch(kIOPSNotifyPowerSource, &token, .main) { _ in handler() }
-        return token
     }
 }
 
-// MARK: - Running child processes (shared with Setup)
+// MARK: - Running child processes (shared with Setup and the CLI)
 
-struct CommandResult {
-    let status: Int32
-    let stdout: String
-    let stderr: String
+public struct CommandResult {
+    public let status: Int32
+    public let stdout: String
+    public let stderr: String
 }
 
 /// Runs a program to completion with stdin closed. Both pipes are drained before waiting so the child
-/// cannot block on a full pipe. Output is expected to be small (sudo, pmset, visudo, launchctl).
-func runCommand(_ path: String, _ arguments: [String]) -> CommandResult {
+/// cannot block on a full pipe. Output is expected to be small (sudo, pmset, visudo, launchctl, open).
+public func runCommand(_ path: String, _ arguments: [String]) -> CommandResult {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: path)
     process.arguments = arguments
@@ -117,9 +131,16 @@ func runCommand(_ path: String, _ arguments: [String]) -> CommandResult {
     let outData = stdout.fileHandleForReading.readDataToEndOfFile()
     let errData = stderr.fileHandleForReading.readDataToEndOfFile()
     process.waitUntilExit()
+    var errorText = String(decoding: errData, as: UTF8.self)
+    if errorText.trimmed.isEmpty && process.terminationStatus != 0 {
+        // A child that dies by a signal or exits silently must still leave a readable error.
+        errorText = process.terminationReason == .uncaughtSignal
+            ? "\(path) terminated by signal \(process.terminationStatus)"
+            : "\(path) exited with status \(process.terminationStatus)"
+    }
     return CommandResult(status: process.terminationStatus,
                          stdout: String(decoding: outData, as: UTF8.self),
-                         stderr: String(decoding: errData, as: UTF8.self))
+                         stderr: errorText)
 }
 
 extension String {

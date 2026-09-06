@@ -36,25 +36,29 @@ public final class KeepAwake {
     private let defaults: UserDefaults
     private let isOnAC: () -> Bool
     private let isSetupInstalled: () -> Bool
+    private let bootSession: () -> String
     private let now: () -> Date
 
     private enum Key {
         static let enabled = "enabled"
         static let deadline = "deadline"
+        static let bootSession = "bootSession"
         static let mode = "mode"
         static let autoOffHours = "autoOffHours"
         static let restoreAfterRestart = "restoreAfterRestart"
     }
 
     public init(power: PowerControlling = PowerController(),
-                defaults: UserDefaults,
+                defaults: UserDefaults = UserDefaults(suiteName: Shutlid.defaultsSuite)!,
                 isOnAC: @escaping () -> Bool = PowerSource.isOnAC,
                 isSetupInstalled: @escaping () -> Bool = Setup.isInstalled,
+                bootSession: @escaping () -> String = BootSession.current,
                 now: @escaping () -> Date = Date.init) {
         self.power = power
         self.defaults = defaults
         self.isOnAC = isOnAC
         self.isSetupInstalled = isSetupInstalled
+        self.bootSession = bootSession
         self.now = now
     }
 
@@ -73,12 +77,23 @@ public final class KeepAwake {
         defaults.object(forKey: Key.deadline) as? Date
     }
 
+    /// True when the request was made during the current boot, i.e. the Mac has not restarted since.
+    private var requestedThisBoot: Bool {
+        let stored = defaults.string(forKey: Key.bootSession) ?? ""
+        return !stored.isEmpty && stored == bootSession()
+    }
+
     private func persist(requested: Bool, deadline: Date?) {
         defaults.set(requested, forKey: Key.enabled)
         if let deadline {
             defaults.set(deadline, forKey: Key.deadline)
         } else {
             defaults.removeObject(forKey: Key.deadline)
+        }
+        if requested {
+            defaults.set(bootSession(), forKey: Key.bootSession)
+        } else {
+            defaults.removeObject(forKey: Key.bootSession)
         }
     }
 
@@ -93,16 +108,19 @@ public final class KeepAwake {
             return Settings(mode: mode, autoOffHours: hours, restoreAfterRestart: defaults.bool(forKey: Key.restoreAfterRestart))
         }
         set {
-            let previousHours = settings.autoOffHours
+            let previous = settings
             defaults.set(newValue.mode.rawValue, forKey: Key.mode)
             defaults.set(newValue.autoOffHours, forKey: Key.autoOffHours)
             defaults.set(newValue.restoreAfterRestart, forKey: Key.restoreAfterRestart)
             Log.settingsChanged(newValue)
             // Changing Auto-off while ON restarts the countdown.
-            if requested && newValue.autoOffHours != previousHours {
+            if requested && newValue.autoOffHours != previous.autoOffHours {
                 persist(requested: true, deadline: deadlineFromNow(hours: newValue.autoOffHours))
             }
-            try? applyMode()  // failures are already logged inside; the status will show reality
+            // Changing the mode while ON applies it at once (failures are logged; the status shows reality).
+            if requested && newValue.mode != previous.mode {
+                try? applyMode()
+            }
             notifyChanged()
         }
     }
@@ -129,7 +147,7 @@ public final class KeepAwake {
             throw error
         }
         persist(requested: true, deadline: deadlineFromNow(hours: hours))
-        Log.turnedOn(source: source, autoOff: Log.autoOffText(hours: hours), deferred: !applyFlag)
+        Log.turnedOn(source: source, autoOff: Status.autoOffText(hours: hours), deferred: !applyFlag)
         notifyChanged()
     }
 
@@ -140,8 +158,9 @@ public final class KeepAwake {
         } catch let error as PowerError where error.kind == .setupRequired && !power.isPreventingSleep() {
             // Fresh machine, nothing to release: `shutlid off` succeeds.
         } catch {
-            // Keep the deadline so the app's timer retries the turn-off.
-            persist(requested: false, deadline: deadline)
+            // Fail closed in what is persisted; the kernel flag stays until the manual reset, and the
+            // status says so ("turn-off failed").
+            persist(requested: false, deadline: nil)
             Log.failure(String(describing: error))
             notifyChanged()
             throw error
@@ -151,7 +170,14 @@ public final class KeepAwake {
         notifyChanged()
     }
 
-    /// Reconciles the flag with the mode after a power-source change or a settings write. Deadline unchanged.
+    /// A power-source event only matters when the mode depends on power. In Always mode a flag that is off
+    /// while requested was cleared by hand (`sudo pmset disablesleep 0`) or by the boot reset, and that stands.
+    public func powerSourceChanged() throws {
+        guard settings.mode == .onlyOnPower else { return }
+        try applyMode()
+    }
+
+    /// Makes the flag match the mode and the power source while requested. Deadline unchanged.
     public func applyMode() throws {
         guard requested else { return }
         let want = Self.flagShouldBeOn(requested: true, mode: settings.mode, onAC: isOnAC())
@@ -173,7 +199,10 @@ public final class KeepAwake {
             return
         }
         guard !power.isPreventingSleep() else { return }  // crash case: the request is still in effect
-        // The flag is gone (boot reset). No mode gate: a stale request must not survive a reboot.
+        if requestedThisBoot && !Self.flagShouldBeOn(requested: true, mode: settings.mode, onAC: isOnAC()) {
+            return  // same boot and the flag is meant to be off: a request waiting for power, not a stale one
+        }
+        // The flag is gone (boot reset or manual reset). No mode gate: a stale request must not survive a reboot.
         if settings.restoreAfterRestart {
             try turnOn(source: .restore)
         } else {
@@ -220,5 +249,16 @@ public final class KeepAwake {
     /// Every state change ends here so the app refreshes its icon at once (it also receives its own posts).
     private func notifyChanged() {
         notify_post(Shutlid.changedNotification)
+    }
+}
+
+/// Identifies the current boot, so a request can tell a restart from a relaunch of the app.
+public enum BootSession {
+    public static func current() -> String {
+        var size = 0
+        guard sysctlbyname("kern.bootsessionuuid", nil, &size, nil, 0) == 0, size > 0 else { return "" }
+        var buffer = [CChar](repeating: 0, count: size)
+        guard sysctlbyname("kern.bootsessionuuid", &buffer, &size, nil, 0) == 0 else { return "" }
+        return String(cString: buffer)
     }
 }
