@@ -248,10 +248,11 @@ defaults delete com.yairix.shutlid.state
 ## Supported macOS
 
 macOS 14 or later, Apple Silicon only. Built and unit-tested on macOS 27 beta
-on a MacBook Pro (M4 Pro); `shutlid status`, `--help` and `--version` verified
-against the built app. The physical closed-lid test on battery, which is what
-would justify a claim of closed-lid support, is written up in
-[MANUAL_TESTING.md](MANUAL_TESTING.md) and has not been run yet.
+on a MacBook Pro (M4 Pro). Verified there against the real kernel flag: setup,
+`shutlid on` (`SleepDisabled 1`, app launched, auto-off armed), `shutlid off`
+(`SleepDisabled 0`), `status` and the log entries. The physical closed-lid test
+on battery, which is what would justify a claim of closed-lid support, is
+written up in [MANUAL_TESTING.md](MANUAL_TESTING.md) and has not been run yet.
 
 ## Known limitations
 
