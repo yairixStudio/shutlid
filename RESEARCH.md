@@ -61,8 +61,10 @@ the app through the standard macOS administrator dialog):
    `/usr/bin/pmset disablesleep 0` once at boot. No resident process.
 3. `/usr/local/bin/shutlid`, a symlink to the CLI inside the app bundle.
 
-Afterwards the app and the CLI run `sudo -n /usr/bin/pmset disablesleep 1|0`.
-No password is ever seen, stored or piped by this project.
+Afterwards the app and the CLI run `sudo -k -n /usr/bin/pmset disablesleep 1|0`
+(`-k` ignores any cached sudo credential, so the call succeeds only through the
+rule and never by accident). No password is ever seen, stored or piped by this
+project.
 
 ## 3. Network with the lid closed
 
@@ -93,7 +95,9 @@ Consequences to state plainly:
   the flag persists. Sleepless reports it resets on macOS 26.3. Either way the
   boot-reset LaunchDaemon guarantees normal sleep after any restart without
   opening the app; running `disablesleep 0` when it is already 0 is a no-op.
-- **App quit.** The app turns keep-awake off before exiting and logs it.
+- **App quit.** The app releases the flag before exiting and logs it. The
+  persisted request is kept only when "restore previous state" is on, so it can
+  be re-applied at the next login.
 - **App crash.** The flag stays set and auto-off cannot fire until the app runs
   again (it re-checks the deadline at launch), `shutlid off` is run, or the Mac
   reboots. Documented as the known gap.
@@ -132,7 +136,7 @@ Consequences to state plainly:
 | `IOPMrootDomain` `SleepDisabled` property (read) | Same lifetime as the flag | Same as above. |
 | `SMAppService.mainApp` login item | Documented, macOS 13+ | Low. |
 | `IOPSNotificationCreateRunLoopSource` (AC/battery events) | Documented | Low. |
-| macOS "Background Items" UI (13+) | Shows the boot-reset daemon; a user can disable it | If disabled, the boot reset does not run. Documented. |
+| macOS "Background Items" UI (13+) | Lists the boot-reset daemon (display name to be recorded in the manual test); a user can disable it | If disabled, the boot reset does not run. Documented. |
 
 Supported: macOS 14 and later (SMAppService is 13+; tested on 27 beta).
 
@@ -197,7 +201,8 @@ permitted by the scoped rule. Setup needs one admin authorization. The app and
 the CLI never see a password.
 
 **State**: `enabled`, `mode`, `autoOffHours`, `deadline`, `restoreAfterRestart`
-in `UserDefaults`. Launch at login is tracked by macOS. Effective state is read
+in the `UserDefaults` suite `com.yairix.shutlid.state` (a suite name must not
+equal the app's bundle identifier). Launch at login is tracked by macOS. Effective state is read
 from the kernel every time; nothing reconciles it.
 
 **Expected failure modes**
@@ -207,7 +212,7 @@ from the kernel every time; nothing reconciles it.
 | Setup not done, `on` called | `sudo -n` refuses; `on` prints how to run setup, exits non-zero. Mac keeps normal sleep. |
 | `pmset` fails or `disablesleep` removed by Apple | `on` reports the error; `status` shows `Effective: OFF`. |
 | App crash while ON | Flag stays until `off`, next app launch, or reboot. Auto-off does not fire. Documented. |
-| App quit / logout | Turns OFF first. |
+| App quit / logout | Releases the flag first. Keeps the request only when "restore previous state" is on. |
 | Reboot | Boot reset turns OFF. With "restore previous state" on, the app re-enables at login with a fresh deadline. |
 | Deadline passes while app not running | Next launch of the app or `status` shows it expired; app turns OFF at launch. |
 | Boot-reset daemon disabled by user in System Settings | Flag may persist a reboot; `status` shows reality. Documented. |
