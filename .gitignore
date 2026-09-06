@@ -5,3 +5,4 @@ DerivedData/
 dist/
 *.dmg
 .DS_Store
+.build-*/
