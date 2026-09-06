@@ -94,7 +94,7 @@ final class StatusTests: XCTestCase {
         XCTAssertEqual(status(requested: true, effective: true, deadline: at(-5)).menuTitle(now: now),
                        "● Keeping awake — auto-off expired")
         XCTAssertEqual(status(requested: false, effective: true).menuTitle(now: now),
-                       "● Keeping awake — no auto-off", "effective wins even when not requested")
+                       "● Keeping awake — turn-off failed", "the flag is set although nothing requested it")
         XCTAssertEqual(status(requested: true, effective: false, mode: .onlyOnPower, onAC: false).menuTitle(now: now),
                        "◐ On battery — keeps awake when plugged in")
         XCTAssertEqual(status(requested: true, effective: false, mode: .onlyOnPower, onAC: true).menuTitle(now: now),

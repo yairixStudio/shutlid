@@ -2,14 +2,11 @@ import XCTest
 @testable import ShutlidCore
 
 final class KeepAwakeTests: XCTestCase {
-    /// One fixed suite for the whole class: cfprefsd keeps an (empty) plist per suite name it has seen.
-    private static let suite = "com.yairix.shutlid.tests"
     private let start = Date(timeIntervalSince1970: 1_700_000_000)
     private var clock = Date(timeIntervalSince1970: 1_700_000_000)
     private var onAC = true
     private var setupInstalled = true
     private var bootSession = "boot-A"
-    private var defaults: UserDefaults!
     private var power: FakePower!
     private var keepAwake: KeepAwake!
 
@@ -18,23 +15,16 @@ final class KeepAwakeTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        defaults = UserDefaults(suiteName: Self.suite)
-        defaults.removePersistentDomain(forName: Self.suite)
         power = FakePower()
         clock = start
         onAC = true
         setupInstalled = true
         bootSession = "boot-A"
-        keepAwake = KeepAwake(power: power, defaults: defaults,
+        keepAwake = KeepAwake(power: power, defaults: MemoryStore(),
                               isOnAC: { [unowned self] in onAC },
                               isSetupInstalled: { [unowned self] in setupInstalled },
                               bootSession: { [unowned self] in bootSession },
                               now: { [unowned self] in clock })
-    }
-
-    override func tearDown() {
-        defaults.removePersistentDomain(forName: Self.suite)
-        super.tearDown()
     }
 
     private func hours(_ hours: Double, from date: Date? = nil) -> Date {
@@ -375,6 +365,18 @@ final class KeepAwakeTests: XCTestCase {
         XCTAssertEqual(power.calls, [true])
         XCTAssertTrue(status.requested)
         XCTAssertTrue(status.effective)
+        XCTAssertEqual(status.deadline, hours(4))
+    }
+
+    func testApplyAtLaunchCrashCasePowerOnlyNowOnBatteryRemovesFlag() throws {
+        keepAwake.settings.mode = .onlyOnPower
+        try keepAwake.turnOn(source: .cli, hours: 4)
+        onAC = false  // unplugged while the app was dead
+        try keepAwake.applyAtLaunch()
+        let status = keepAwake.status()
+        XCTAssertEqual(power.calls, [true, false])
+        XCTAssertTrue(status.requested)
+        XCTAssertFalse(status.effective)
         XCTAssertEqual(status.deadline, hours(4))
     }
 

@@ -152,10 +152,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func runSetupThenTurnOn() {
         // Setup links the command line to this bundle's location, so the app must already be where it will stay.
-        guard Bundle.main.bundleURL.path.hasPrefix("/Applications/") else {
+        let bundlePath = Bundle.main.bundleURL.path
+        if bundlePath.contains("/AppTranslocation/") {
+            // Gatekeeper runs a downloaded app that was not moved with the Finder from a temporary copy.
+            showAlert("Move \(Shutlid.appName) with the Finder first.",
+                      "macOS is running a temporary copy of \(Shutlid.appName) (\(bundlePath)). Drag "
+                          + "\(Shutlid.appName).app to /Applications with the Finder, open it from there, and turn on again.")
+            return
+        }
+        guard bundlePath.hasPrefix("/Applications/") else {
             showAlert("Move \(Shutlid.appName) to the Applications folder first.",
-                      "Setup installs a command-line link to the app's location. Move \(Shutlid.appName).app "
-                          + "to /Applications, open it from there, and turn on again.")
+                      "Setup installs a command-line link to the app's location (now \(bundlePath)). Move "
+                          + "\(Shutlid.appName).app to /Applications, open it from there, and turn on again.")
             return
         }
         let alert = NSAlert()

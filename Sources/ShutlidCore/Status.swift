@@ -50,6 +50,7 @@ public struct Status {
 
     public func menuTitle(now: Date) -> String {
         if effective {
+            if !requested { return "● Keeping awake — turn-off failed" }
             guard let deadline else { return "● Keeping awake — no auto-off" }
             if deadline > now { return "● Keeping awake — auto-off in \(Self.remainingText(until: deadline, now: now))" }
             return "● Keeping awake — auto-off expired"

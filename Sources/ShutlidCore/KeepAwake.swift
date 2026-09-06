@@ -28,12 +28,21 @@ public struct Settings: Equatable {
     }
 }
 
+/// The three UserDefaults calls KeepAwake needs, so tests can run against an in-memory store.
+public protocol Store {
+    func object(forKey key: String) -> Any?
+    func set(_ value: Any?, forKey key: String)
+    func removeObject(forKey key: String)
+}
+
+extension UserDefaults: Store {}
+
 /// The single switch shared by the menu-bar app and the CLI. Last touch wins; there is no owner.
 /// Persists the request (`enabled`, `deadline`) and the settings; the kernel is the source of truth
 /// for the effective state and is read fresh every time.
 public final class KeepAwake {
     private let power: PowerControlling
-    private let defaults: UserDefaults
+    private let defaults: Store
     private let isOnAC: () -> Bool
     private let isSetupInstalled: () -> Bool
     private let bootSession: () -> String
@@ -49,7 +58,7 @@ public final class KeepAwake {
     }
 
     public init(power: PowerControlling = PowerController(),
-                defaults: UserDefaults = UserDefaults(suiteName: Shutlid.defaultsSuite)!,
+                defaults: Store = UserDefaults(suiteName: Shutlid.defaultsSuite)!,
                 isOnAC: @escaping () -> Bool = PowerSource.isOnAC,
                 isSetupInstalled: @escaping () -> Bool = Setup.isInstalled,
                 bootSession: @escaping () -> String = BootSession.current,
@@ -70,7 +79,7 @@ public final class KeepAwake {
     // MARK: - Persisted state
 
     private var requested: Bool {
-        defaults.bool(forKey: Key.enabled)
+        defaults.object(forKey: Key.enabled) as? Bool ?? false
     }
 
     private var deadline: Date? {
@@ -79,7 +88,7 @@ public final class KeepAwake {
 
     /// True when the request was made during the current boot, i.e. the Mac has not restarted since.
     private var requestedThisBoot: Bool {
-        let stored = defaults.string(forKey: Key.bootSession) ?? ""
+        let stored = defaults.object(forKey: Key.bootSession) as? String ?? ""
         return !stored.isEmpty && stored == bootSession()
     }
 
@@ -103,9 +112,10 @@ public final class KeepAwake {
 
     public var settings: Settings {
         get {
-            let mode = Mode(rawValue: defaults.string(forKey: Key.mode) ?? "") ?? .always
-            let hours = defaults.object(forKey: Key.autoOffHours) == nil ? 24 : defaults.integer(forKey: Key.autoOffHours)
-            return Settings(mode: mode, autoOffHours: hours, restoreAfterRestart: defaults.bool(forKey: Key.restoreAfterRestart))
+            let mode = Mode(rawValue: defaults.object(forKey: Key.mode) as? String ?? "") ?? .always
+            let hours = defaults.object(forKey: Key.autoOffHours) as? Int ?? 24
+            let restore = defaults.object(forKey: Key.restoreAfterRestart) as? Bool ?? false
+            return Settings(mode: mode, autoOffHours: hours, restoreAfterRestart: restore)
         }
         set {
             let previous = settings
@@ -198,7 +208,11 @@ public final class KeepAwake {
             try turnOff(source: .autoOff)
             return
         }
-        guard !power.isPreventingSleep() else { return }  // crash case: the request is still in effect
+        if power.isPreventingSleep() {
+            // Crash case: the request is still in effect. The power source may have changed meanwhile.
+            try applyMode()
+            return
+        }
         if requestedThisBoot && !Self.flagShouldBeOn(requested: true, mode: settings.mode, onAC: isOnAC()) {
             return  // same boot and the flag is meant to be off: a request waiting for power, not a stale one
         }
