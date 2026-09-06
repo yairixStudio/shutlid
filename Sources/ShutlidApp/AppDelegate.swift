@@ -156,8 +156,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if bundlePath.contains("/AppTranslocation/") {
             // Gatekeeper runs a downloaded app that was not moved with the Finder from a temporary copy.
             showAlert("Move \(Shutlid.appName) with the Finder first.",
-                      "macOS is running a temporary copy of \(Shutlid.appName) (\(bundlePath)). Drag "
-                          + "\(Shutlid.appName).app to /Applications with the Finder, open it from there, and turn on again.")
+                      "macOS is running a temporary copy of \(Shutlid.appName) (\(bundlePath)). In the Finder, drag "
+                          + "\(Shutlid.appName).app out of its folder and back into /Applications, open it again, and turn on.")
             return
         }
         guard bundlePath.hasPrefix("/Applications/") else {

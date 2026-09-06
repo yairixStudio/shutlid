@@ -32,8 +32,11 @@ sudo "/Applications/Shutlid.app/Contents/MacOS/shutlid" setup
 ```
 
 If macOS refuses to open an unsigned build, right-click the app and choose
-Open (or allow it under System Settings › Privacy & Security). Always move it
-to `/Applications` before opening it; setup refuses a translocated copy.
+Open (or allow it under System Settings › Privacy & Security). Move a
+downloaded app with the Finder: an app copied with `cp` or unzipped straight
+into `/Applications` keeps its quarantine flag, macOS then runs a temporary
+copy of it, and setup refuses that copy. Dragging it out of the folder and
+back in with the Finder clears the condition.
 
 After setup, `shutlid` is on your `PATH` and neither the app nor the CLI ever
 asks for a password again.

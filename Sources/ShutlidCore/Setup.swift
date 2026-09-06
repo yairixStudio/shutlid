@@ -54,7 +54,7 @@ public enum Setup {
         }
         // Gatekeeper runs a downloaded, unmoved app from a temporary path that vanishes when the app quits.
         guard !cliPath.contains("/AppTranslocation/") else {
-            throw SetupError("move \(Shutlid.appName).app to /Applications first, then run setup again")
+            throw SetupError("macOS runs this copy from a temporary location; in the Finder, drag \(Shutlid.appName).app out of its folder and back into /Applications, then run setup again")
         }
         guard getuid() == 0 else {
             throw SetupError("Run: sudo \"\(cliPath)\" setup")
