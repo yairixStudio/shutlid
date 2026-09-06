@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://yairixstudio.github.io/shutlid/sitemap.xml
