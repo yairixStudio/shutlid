@@ -1,5 +1,7 @@
 # Shutlid
 
+Website: [yairixstudio.github.io/shutlid](https://yairixstudio.github.io/shutlid/)
+
 Shutlid keeps a MacBook running with the lid closed: processes, SSH sessions,
 dev servers and downloads carry on as if the lid were open, on battery or on
 AC, with no external display or peripheral attached. The scenario it is built

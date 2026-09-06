@@ -83,6 +83,7 @@
   pre code { background: none; padding: 0; }
   .note { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin: 0 0 14px; }
   a { color: inherit; }
+  .muted { color: var(--muted); font-size: 0.95rem; margin-top: -24px; }
   footer { margin-top: 56px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.95rem; }
   footer a { margin-right: 16px; }
 </style>
@@ -106,6 +107,9 @@
     <a class="btn primary" href="https://github.com/yairixStudio/shutlid/releases">Download for macOS</a>
     <a class="btn" href="https://github.com/yairixStudio/shutlid">View on GitHub</a>
   </div>
+  <p class="muted">No release yet: the first build is published after the closed-lid test on the
+  M4 (see the status below). Until then, build from source with
+  <code>scripts/build.sh</code>.</p>
 
   <h2>Three commands</h2>
 <pre><code>shutlid on        # keep the Mac awake, lid closed or not
