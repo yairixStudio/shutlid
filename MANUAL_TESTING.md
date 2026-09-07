@@ -185,6 +185,28 @@ Restore previous state:
    sudo -k -n -l /usr/bin/pmset disablesleep 1           # fails: a password is required
    ```
 
+## 7. Low Power Mode while the lid is closed
+
+Needs the five-command rule: if setup was run with an earlier build, run
+`sudo "/Applications/Shutlid.app/Contents/MacOS/shutlid" setup` once more.
+
+1. `pmset -g custom | grep -A2 Battery` and note the battery `powermode`
+   (0 automatic, 1 low, 2 high): ______.
+2. `shutlid on`, close the lid for 5 minutes, open it.
+3. The log shows `energy mode: low (lid closed; was high)` at close and
+   `energy mode: restored (high)` at open; `pmset -g custom` shows the value
+   from step 1 again; while closed, `shutlid status` over SSH showed the line
+   `Energy:     low power (lid closed; restores to high)`.
+4. Samples: `log show --predicate 'subsystem == "com.yairix.shutlid" AND category == "samples"' --last 1h --style compact`
+   shows one `sample:` line every 5 minutes with `lid=closed` and `energy=low`.
+5. Heat comparison (optional, the point of the feature): run the same
+   30-minute closed-lid workload twice, once with the setting on and once
+   paused (Settings… › When the lid is closed, unchecked), and compare
+   `batteryTemp` in the samples: on ______ °C, paused ______ °C.
+6. Settings… › uncheck "Low Power Mode while the lid is closed" while the lid is
+   closed and keep-awake is on: the log shows `energy mode: restored (...)` at
+   once. Re-check it, or wait for the pause to expire.
+
 ## Results
 
 | Test | Date | Build | Result | Notes |
@@ -199,4 +221,6 @@ Restore previous state:
 | 4. Restart, restore: ON at login with fresh deadline | | | | |
 | 5. Power mode unplug → sleeps, replug → ON again (woke on AC?) | | | | |
 | 6. Quit releases; uninstall clean and revoked | | | | |
+| 7. Low Power while closed: applied at close, restored at open, samples logged | | | | |
+| 7. Battery temperature, 30 min closed: on vs paused | | | | |
 | Login Items display name of the boot-reset daemon | | | | |

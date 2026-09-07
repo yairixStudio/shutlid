@@ -81,6 +81,14 @@ func turnOn(hours: Int?) -> Int32 {
     } catch {
         return report(error)
     }
+    // Low Power while the lid is closed (a no-op unless the lid is closed right now, e.g. over SSH).
+    do {
+        try keepAwake.syncLowPower()
+    } catch let error as PowerError where error.kind == .setupRequired {
+        printError("warning: Low Power Mode while the lid is closed needs setup to run again: sudo \"\(setupPath)\" setup")
+    } catch {
+        printError("warning: Low Power Mode: \(error)")
+    }
     if launchApp() { return 0 }
     if keepAwake.status().deadline == nil {
         printError("warning: \(Shutlid.appName).app could not be launched; no auto-off was requested, continuing")

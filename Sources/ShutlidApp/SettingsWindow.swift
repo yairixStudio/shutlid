@@ -2,19 +2,24 @@ import AppKit
 import ServiceManagement
 import ShutlidCore
 
-/// "Shutlid Settings": the four settings and nothing else. Every change is saved at once.
+/// "Shutlid Settings": the five settings and nothing else. Every change is saved at once.
 final class SettingsWindow: NSWindow {
     private let keepAwake: KeepAwake
     private let grid = NSGridView(numberOfColumns: 2, rows: 0)
     private let modePopup = NSPopUpButton()
     private let autoOffPopup = NSPopUpButton()
     private let restartPopup = NSPopUpButton()
+    private let lowPowerCheckbox = NSButton(checkboxWithTitle: "Low Power Mode while the lid is closed", target: nil, action: nil)
+    private let lowPowerPausePopup = NSPopUpButton()
     private let loginCheckbox = NSButton(checkboxWithTitle: "Launch at login", target: nil, action: nil)
     private let loginHint = SettingsWindow.hint("")
     private let loginOpenButton = NSButton(title: "Open…", target: nil, action: nil)
 
     /// Popup order for Auto-off; 0 hours means never.
     private static let autoOffChoices = [("1 hour", 1), ("4 hours", 4), ("8 hours", 8), ("24 hours", 24), ("Never", 0)]
+    /// How long Low Power stays off once unchecked; 0 hours means permanently. It re-arms itself otherwise.
+    private static let pauseChoices = [("Off for 1 hour", 1), ("Off for 4 hours", 4), ("Off for 8 hours", 8),
+                                       ("Off for 24 hours", 24), ("Off permanently", 0)]
 
     init(keepAwake: KeepAwake) {
         self.keepAwake = keepAwake
@@ -28,6 +33,12 @@ final class SettingsWindow: NSWindow {
             popup.target = self
             popup.action = #selector(saveSettings)
         }
+        lowPowerPausePopup.addItems(withTitles: Self.pauseChoices.map { $0.0 })
+        lowPowerPausePopup.selectItem(at: 3)
+        lowPowerCheckbox.target = self
+        lowPowerCheckbox.action = #selector(lowPowerChanged)
+        lowPowerPausePopup.target = self
+        lowPowerPausePopup.action = #selector(lowPowerChanged)
         loginCheckbox.target = self
         loginCheckbox.action = #selector(loginChanged)
         loginOpenButton.target = self
@@ -42,6 +53,10 @@ final class SettingsWindow: NSWindow {
             "Restored when Shutlid next launches; turn on Launch at login to make it automatic.")
         let loginRow = NSStackView(views: [loginHint, loginOpenButton])
         grid.addRow(with: [NSGridCell.emptyContentView, restartHint])
+        grid.addRow(with: [Self.label("When the lid is closed:"), lowPowerCheckbox])
+        grid.addRow(with: [NSGridCell.emptyContentView, lowPowerPausePopup])
+        grid.addRow(with: [NSGridCell.emptyContentView, Self.hint(
+            "Runs cooler in a bag: the battery Energy Mode switches to Low Power while the lid is closed and is restored when it opens.")])
         grid.addRow(with: [NSGridCell.emptyContentView, loginCheckbox])
         grid.addRow(with: [NSGridCell.emptyContentView, loginRow])  // the last row; hidden unless there is a hint
         grid.rowAlignment = .firstBaseline
@@ -77,6 +92,31 @@ final class SettingsWindow: NSWindow {
         modePopup.selectItem(at: settings.mode == .always ? 0 : 1)
         autoOffPopup.selectItem(at: Self.autoOffChoices.firstIndex { $0.1 == settings.autoOffHours } ?? -1)
         restartPopup.selectItem(at: settings.restoreAfterRestart ? 1 : 0)
+        let lowPowerOn = settings.lowPowerWhenClosed(now: Date())
+        lowPowerCheckbox.state = lowPowerOn ? .on : .off
+        if settings.lowPowerPausedUntil == .distantFuture { lowPowerPausePopup.selectItem(at: Self.pauseChoices.count - 1) }
+        showLowPowerPause(hidden: lowPowerOn)
+    }
+
+    /// The pause popup is only meaningful while the checkbox is off; the popup row is the one after the checkbox.
+    private func showLowPowerPause(hidden: Bool) {
+        let row = grid.index(of: grid.cell(for: lowPowerPausePopup)!.row!)
+        grid.row(at: row).isHidden = hidden
+        setContentSize(contentView!.fittingSize)
+    }
+
+    /// Unchecking pauses Low Power for the chosen duration (24 hours unless changed) or permanently;
+    /// the pause end is fixed when it is set, so other settings changes do not move it.
+    @objc private func lowPowerChanged() {
+        var settings = keepAwake.settings
+        if lowPowerCheckbox.state == .on {
+            settings.lowPowerPausedUntil = nil
+        } else {
+            let hours = Self.pauseChoices[max(lowPowerPausePopup.indexOfSelectedItem, 0)].1
+            settings.lowPowerPausedUntil = hours == 0 ? .distantFuture : Date().addingTimeInterval(Double(hours) * 3600)
+        }
+        showLowPowerPause(hidden: lowPowerCheckbox.state == .on)
+        if settings != keepAwake.settings { keepAwake.settings = settings }
     }
 
     @objc private func saveSettings() {

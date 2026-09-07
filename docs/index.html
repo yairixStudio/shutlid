@@ -71,7 +71,7 @@
     {
       "@type": "Question",
       "name": "Will this drain my battery or overheat my MacBook?",
-      "acceptedAnswer": { "@type": "Answer", "text": "A closed laptop in a bag cannot shed heat as well as an open one, and while keep-awake is on, low-battery emergency sleep is disabled too. Auto-off is on by default (24 hours) as the safety net, adjustable down to 1 hour or off entirely." }
+      "acceptedAnswer": { "@type": "Answer", "text": "A closed laptop in a bag cannot shed heat as well as an open one, and while keep-awake is on, low-battery emergency sleep is disabled too. By default Shutlid switches the battery Energy Mode to Low Power while the lid is closed and restores it when the lid opens, and it logs the battery temperature every five minutes so you can see what happened. Auto-off is on by default (24 hours) as the safety net, adjustable down to 1 hour or off entirely." }
     },
     {
       "@type": "Question",
@@ -332,8 +332,7 @@
       <div class="badges">
         <span class="badge">macOS 14+</span>
         <span class="badge">Apple Silicon</span>
-        <span class="badge">Zero dependencies</span>
-        <span class="badge">Swift, ~1,300 lines</span>
+        <span class="badge">Swift, zero dependencies</span>
         <span class="badge">No telemetry, no network</span>
       </div>
     </div>
@@ -391,12 +390,12 @@
       <div class="card">
         <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-11V5l-8-3-8 3v6c0 7 8 11 8 11Z"/></svg></div>
         <h3>Isolated privilege</h3>
-        <p>Setup installs a sudo rule scoped to exactly two commands. After that, no custom code ever runs as root.</p>
+        <p>Setup installs a sudo rule scoped to five literal commands: the sleep flag on or off, and the battery Energy Mode. After that, no custom code ever runs as root.</p>
       </div>
       <div class="card">
         <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v4l3 3M21 12a9 9 0 1 1-9-9"/></svg></div>
         <h3>Auto-off safety net</h3>
-        <p>24 hours by default, adjustable from 1 hour to never. A forgotten laptop does not stay awake forever.</p>
+        <p>24 hours by default, adjustable from 1 hour to never. And while the lid is closed, the battery switches to Low Power Mode so a bag stays cooler.</p>
       </div>
       <div class="card">
         <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 17l6-6-6-6M12 19h8"/></svg></div>
@@ -501,7 +500,7 @@ shutlid log</span></code></pre>
     <ul class="checklist">
       <li>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg>
-        <div><strong>Only two commands, ever.</strong><span class="d"> The sudo rule matches arguments literally — it permits turning the flag on or off, nothing else.</span></div>
+        <div><strong>Only five literal commands, ever.</strong><span class="d"> The sudo rule matches arguments literally — the sleep flag on or off, and the battery Energy Mode (automatic, low, high). Nothing else.</span></div>
       </li>
       <li>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg>
@@ -551,8 +550,10 @@ shutlid log</span></code></pre>
       <details class="faq">
         <summary>Will this drain my battery or overheat my MacBook?</summary>
         <p>A closed laptop in a bag cannot shed heat as well as an open one, and while keep-awake is on,
-          low-battery emergency sleep is disabled too. Auto-off is on by default (24 hours) as the safety net,
-          adjustable down to 1 hour or off entirely.</p>
+          low-battery emergency sleep is disabled too. By default Shutlid switches the battery Energy Mode to
+          Low Power while the lid is closed and restores it when the lid opens, and it logs the battery
+          temperature every five minutes so you can see what happened. Auto-off is on by default (24 hours)
+          as the safety net, adjustable down to 1 hour or off entirely.</p>
       </details>
       <details class="faq">
         <summary>Can an AI coding agent control Shutlid without a GUI?</summary>

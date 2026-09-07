@@ -9,9 +9,9 @@ final class StatusTests: XCTestCase {
     }
 
     private func status(requested: Bool, effective: Bool, mode: Mode = .always, onAC: Bool = true,
-                        deadline: Date? = nil, autoOffHours: Int = 24) -> Status {
+                        deadline: Date? = nil, autoOffHours: Int = 24, lowPowerRestoresTo: Int? = nil) -> Status {
         Status(requested: requested, effective: effective, mode: mode, onAC: onAC,
-               deadline: deadline, autoOffHours: autoOffHours)
+               deadline: deadline, autoOffHours: autoOffHours, lowPowerRestoresTo: lowPowerRestoresTo)
     }
 
     // MARK: - cliText
@@ -82,6 +82,22 @@ final class StatusTests: XCTestCase {
         XCTAssertTrue(text.hasSuffix("\nAuto-off:   expired"), text)
         let exactlyNow = status(requested: true, effective: true, deadline: now).cliText(now: now)
         XCTAssertTrue(exactlyNow.hasSuffix("\nAuto-off:   expired"), exactlyNow)
+    }
+
+    func testCliTextWithLowPowerActive() {
+        let text = status(requested: true, effective: true, deadline: at(3600), lowPowerRestoresTo: 2).cliText(now: now)
+        XCTAssertEqual(text, """
+        Requested:  ON
+        Effective:  ON
+        Mode:       always
+        Auto-off:   in 1h 0m
+        Energy:     low power (lid closed; restores to high)
+        """)
+    }
+
+    func testMenuTitleWithLowPowerActive() {
+        XCTAssertEqual(status(requested: true, effective: true, deadline: at(3600), lowPowerRestoresTo: 0).menuTitle(now: now),
+                       "● Keeping awake — auto-off in 1h 0m · low power")
     }
 
     // MARK: - menuTitle and isOnLike

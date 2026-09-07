@@ -20,11 +20,26 @@ public struct Settings: Equatable {
     /// 1, 4, 8 or 24; 0 means never.
     public var autoOffHours: Int
     public var restoreAfterRestart: Bool
+    /// Low Power Mode while the lid is closed is on unless paused: nil = on; `.distantFuture` = off for
+    /// good; any other date = off until then, after which it re-arms itself.
+    public var lowPowerPausedUntil: Date?
 
-    public init(mode: Mode, autoOffHours: Int, restoreAfterRestart: Bool) {
+    public init(mode: Mode, autoOffHours: Int, restoreAfterRestart: Bool, lowPowerPausedUntil: Date? = nil) {
         self.mode = mode
         self.autoOffHours = autoOffHours
         self.restoreAfterRestart = restoreAfterRestart
+        self.lowPowerPausedUntil = lowPowerPausedUntil
+    }
+
+    public func lowPowerWhenClosed(now: Date) -> Bool {
+        guard let until = lowPowerPausedUntil else { return true }
+        return until <= now
+    }
+
+    /// For the log: "on", "off", or "off until 2026-09-08T10:00:00Z".
+    public var lowPowerText: String {
+        guard let until = lowPowerPausedUntil else { return "on" }
+        return until == .distantFuture ? "off" : "off until \(ISO8601DateFormatter().string(from: until))"
     }
 }
 
@@ -44,6 +59,7 @@ public final class KeepAwake {
     private let power: PowerControlling
     private let defaults: Store
     private let isOnAC: () -> Bool
+    private let isLidClosed: () -> Bool
     private let isSetupInstalled: () -> Bool
     private let bootSession: () -> String
     private let now: () -> Date
@@ -55,17 +71,21 @@ public final class KeepAwake {
         static let mode = "mode"
         static let autoOffHours = "autoOffHours"
         static let restoreAfterRestart = "restoreAfterRestart"
+        static let lowPowerPausedUntil = "lowPowerPausedUntil"
+        static let previousBatteryPowerMode = "previousBatteryPowerMode"
     }
 
     public init(power: PowerControlling = PowerController(),
                 defaults: Store = UserDefaults(suiteName: Shutlid.defaultsSuite)!,
                 isOnAC: @escaping () -> Bool = PowerSource.isOnAC,
+                isLidClosed: @escaping () -> Bool = Lid.isClosed,
                 isSetupInstalled: @escaping () -> Bool = Setup.isInstalled,
                 bootSession: @escaping () -> String = BootSession.current,
                 now: @escaping () -> Date = Date.init) {
         self.power = power
         self.defaults = defaults
         self.isOnAC = isOnAC
+        self.isLidClosed = isLidClosed
         self.isSetupInstalled = isSetupInstalled
         self.bootSession = bootSession
         self.now = now
@@ -84,6 +104,11 @@ public final class KeepAwake {
 
     private var deadline: Date? {
         defaults.object(forKey: Key.deadline) as? Date
+    }
+
+    /// The battery Energy Mode to restore when the lid opens; nil while Low Power is not ours.
+    private var previousBatteryPowerMode: Int? {
+        defaults.object(forKey: Key.previousBatteryPowerMode) as? Int
     }
 
     /// True when the request was made during the current boot, i.e. the Mac has not restarted since.
@@ -115,13 +140,19 @@ public final class KeepAwake {
             let mode = Mode(rawValue: defaults.object(forKey: Key.mode) as? String ?? "") ?? .always
             let hours = defaults.object(forKey: Key.autoOffHours) as? Int ?? 24
             let restore = defaults.object(forKey: Key.restoreAfterRestart) as? Bool ?? false
-            return Settings(mode: mode, autoOffHours: hours, restoreAfterRestart: restore)
+            let paused = defaults.object(forKey: Key.lowPowerPausedUntil) as? Date
+            return Settings(mode: mode, autoOffHours: hours, restoreAfterRestart: restore, lowPowerPausedUntil: paused)
         }
         set {
             let previous = settings
             defaults.set(newValue.mode.rawValue, forKey: Key.mode)
             defaults.set(newValue.autoOffHours, forKey: Key.autoOffHours)
             defaults.set(newValue.restoreAfterRestart, forKey: Key.restoreAfterRestart)
+            if let paused = newValue.lowPowerPausedUntil {
+                defaults.set(paused, forKey: Key.lowPowerPausedUntil)
+            } else {
+                defaults.removeObject(forKey: Key.lowPowerPausedUntil)
+            }
             Log.settingsChanged(newValue)
             // Changing Auto-off while ON restarts the countdown.
             if requested && newValue.autoOffHours != previous.autoOffHours {
@@ -130,6 +161,9 @@ public final class KeepAwake {
             // Changing the mode while ON applies it at once (failures are logged; the status shows reality).
             if requested && newValue.mode != previous.mode {
                 try? applyMode()
+            }
+            if newValue.lowPowerPausedUntil != previous.lowPowerPausedUntil {
+                try? syncLowPower()
             }
             notifyChanged()
         }
@@ -140,7 +174,8 @@ public final class KeepAwake {
     public func status() -> Status {
         let settings = settings
         return Status(requested: requested, effective: power.isPreventingSleep(), mode: settings.mode,
-                      onAC: isOnAC(), deadline: deadline, autoOffHours: settings.autoOffHours)
+                      onAC: isOnAC(), deadline: deadline, autoOffHours: settings.autoOffHours,
+                      lowPowerRestoresTo: previousBatteryPowerMode)
     }
 
     /// `hours` overrides the configured auto-off (CLI `--for`). Nothing is persisted until the flag step
@@ -163,6 +198,7 @@ public final class KeepAwake {
 
     /// Always runs the disable command: `off` must be a sufficient reset even if the registry read is wrong.
     public func turnOff(source: Source) throws {
+        try? restoreLowPower()  // failures are logged inside; the flag still comes off
         do {
             try power.preventSleep(false)
         } catch let error as PowerError where error.kind == .setupRequired && !power.isPreventingSleep() {
@@ -233,6 +269,7 @@ public final class KeepAwake {
             try turnOff(source: .quit)
             return
         }
+        try? restoreLowPower()
         if power.isPreventingSleep() {
             try setFlag(false)
         }
@@ -240,6 +277,51 @@ public final class KeepAwake {
         if !settings.restoreAfterRestart {
             persist(requested: false, deadline: nil)
         }
+        notifyChanged()
+    }
+
+    // MARK: - Low Power Mode while the lid is closed
+
+    /// Makes the battery Energy Mode match the lid: Low Power while the lid is closed and keep-awake is on
+    /// (unless paused in Settings), the previous mode otherwise. Called on lid events and at launch.
+    public func syncLowPower() throws {
+        let wanted = isLidClosed() && requested && power.isPreventingSleep()
+            && settings.lowPowerWhenClosed(now: now())
+        if wanted {
+            try applyLowPower()
+        } else {
+            try restoreLowPower()
+        }
+    }
+
+    private func applyLowPower() throws {
+        guard previousBatteryPowerMode == nil else { return }  // already ours
+        guard let current = power.batteryPowerMode(), current != PowerController.lowPowerMode else { return }
+        do {
+            try power.setBatteryPowerMode(PowerController.lowPowerMode)
+        } catch {
+            Log.failure(String(describing: error))
+            throw error
+        }
+        defaults.set(current, forKey: Key.previousBatteryPowerMode)
+        Log.lowPowerApplied(previous: current)
+        notifyChanged()
+    }
+
+    private func restoreLowPower() throws {
+        guard let previous = previousBatteryPowerMode else { return }
+        if power.batteryPowerMode() == PowerController.lowPowerMode {
+            do {
+                try power.setBatteryPowerMode(previous)
+            } catch {
+                Log.failure(String(describing: error))
+                throw error  // the memory stays, so the next lid event or launch retries
+            }
+            Log.lowPowerRestored(to: previous)
+        } else {
+            Log.lowPowerLeft()  // someone changed it meanwhile; their choice stands
+        }
+        defaults.removeObject(forKey: Key.previousBatteryPowerMode)
         notifyChanged()
     }
 

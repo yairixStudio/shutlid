@@ -51,11 +51,12 @@ The icon shows one of three states; the first menu line spells it out.
 - `◐ On battery — keeps awake when plugged in` (dim sun): requested, but the mode is "only while connected to power" and the Mac is on battery. Menu offers **Turn Off**.
 - `○ Normal sleep` (moon): macOS sleeps as usual. Menu offers **Turn On**.
 
-**Settings…** has exactly four rows; every change is saved at once.
+**Settings…** has five rows; every change is saved at once.
 
 - **Mode**: Always (default) / Only while connected to power.
 - **Auto-off after**: 1, 4, 8 or 24 hours (default) / Never. Changing it while on restarts the countdown.
 - **After restart**: Return to normal sleep (default) / Restore previous state. Restore happens when Shutlid next launches, so pair it with Launch at login.
+- **When the lid is closed**: Low Power Mode, on by default. While the lid is closed and keep-awake is on, the battery Energy Mode switches to Low Power so the Mac runs cooler in a bag; it is restored when the lid opens or keep-awake turns off. Unchecking pauses it for 1, 4, 8 or 24 hours (then it re-arms itself) or permanently.
 - **Launch at login**: on / off, managed by macOS (System Settings › General › Login Items).
 
 **Quit** returns the Mac to normal sleep before the app exits.
@@ -97,6 +98,9 @@ right now, read fresh every time. When they differ, the second line says why:
 `Effective:  OFF (not applied; run 'shutlid on' again)` or
 `Effective:  ON (turn-off failed; run: sudo pmset disablesleep 0)`.
 
+While Low Power Mode is active a fifth line appears:
+`Energy:     low power (lid closed; restores to high)`.
+
 | Command | 0 | 1 | 2 |
 |---|---|---|---|
 | `on`, `off` | done | error | setup required |
@@ -137,6 +141,14 @@ until the battery is empty: while keep-awake is on, macOS's low-battery
 emergency sleep is disabled along with every other kind of sleep. Do not leave
 a closed, working laptop somewhere insulated.
 
+Two things reduce the heat. By default, Shutlid switches the battery Energy
+Mode to Low Power while the lid is closed (System Settings › Battery › Energy
+Mode, the same setting), which caps CPU and GPU power, and restores it when the
+lid opens. And every five minutes while keep-awake is on, it writes one line to
+the log with the lid state, power source, battery percentage, battery
+temperature, thermal state, load average and energy mode, so a closed-lid
+session can be inspected afterwards (see [Log](#log)).
+
 The safety net is auto-off: 24 hours by default, adjustable in Settings…
 (1h / 4h / 8h / 24h / Never) or per call with `shutlid on --for <hours>`.
 Turning on again resets the countdown; `status` shows the remaining time.
@@ -154,10 +166,14 @@ Setup runs once as root and installs exactly three things. It is re-runnable.
    before it is put in place), containing one line:
 
    ```
-   %admin ALL=(root) NOPASSWD: /usr/bin/pmset disablesleep 1, /usr/bin/pmset disablesleep 0
+   %admin ALL=(root) NOPASSWD: /usr/bin/pmset disablesleep 1, /usr/bin/pmset disablesleep 0, /usr/bin/pmset -b powermode 0, /usr/bin/pmset -b powermode 1, /usr/bin/pmset -b powermode 2
    ```
 
-   sudo matches arguments literally, so nothing else is permitted.
+   sudo matches arguments literally, so nothing else is permitted: the sleep
+   flag on or off, and the battery Energy Mode (automatic, low, high). Upgrading
+   from a build whose rule had only the two `disablesleep` commands: run setup
+   once more; until then Low Power Mode while the lid is closed is skipped and
+   the app says so.
 
 2. `/Library/LaunchDaemons/com.yairix.shutlid.reset.plist`, a launchd job
    that runs `/usr/bin/pmset disablesleep 0` once at every boot and then
@@ -180,10 +196,11 @@ still reports reality.
   the boot-reset daemon undoes it at every boot either way. The app clears it
   when you quit or when auto-off fires; a crash or a hard kill leaves it set.
 - **After setup, any program running under an admin account on this Mac can
-  toggle sleep prevention without a password.** The rule covers two literal
-  commands and nothing else, so it cannot be used to gain root or run anything
-  else, but it does let any process keep the Mac awake or let it sleep. If
-  that is not acceptable on your machine, do not install Shutlid.
+  toggle sleep prevention and the battery Energy Mode without a password.** The
+  rule covers five literal commands and nothing else, so it cannot be used to
+  gain root or run anything else, but it does let any process keep the Mac
+  awake, let it sleep, or change the battery Energy Mode. If that is not
+  acceptable on your machine, do not install Shutlid.
 - **Resetting always works.** `shutlid off`, `sudo pmset disablesleep 0` or a
   reboot returns the Mac to normal sleep, whether or not the app is running.
 - After setup, no custom code runs as root; the only privileged command is
@@ -215,7 +232,9 @@ log show --predicate 'subsystem == "com.yairix.shutlid"' --last 1d --style compa
 - `turned on (source: cli|gui|restore-after-restart|power-mode, auto-off: 24h)`; `auto-off:` is `never` or `in 3h 10m` as appropriate, with `, waiting for power` added when the request waits for AC.
 - `turned off (source: gui|cli|auto-off|power-mode|restart-reset|quit)`.
 - `settings changed: mode=always, autoOff=24h, restoreAfterRestart=false`.
+- `energy mode: low (lid closed; was high)`, `energy mode: restored (high)`, or `energy mode: left as changed elsewhere` when the Energy Mode was changed by hand meanwhile.
 - `power operation failed: <detail>` (error level).
+- Every five minutes while keeping awake, in category `samples`: `sample: lid=closed power=battery battery=83% batteryTemp=31.2C thermal=nominal load=1.42 energy=low`. Filter with `--predicate 'subsystem == "com.yairix.shutlid" AND category == "samples"'`. The battery temperature comes from the battery pack's own sensor (IO registry); the thermal state is macOS's thermal pressure level.
 
 Nothing else is logged. Note that `swift test` drives the same code against a
 fake power controller, so a test run writes fake `turned on` / `turned off`
@@ -266,6 +285,7 @@ written up in [MANUAL_TESTING.md](MANUAL_TESTING.md) and has not been run yet.
   see [RESEARCH.md §4](RESEARCH.md).
 - Moving `Shutlid.app` breaks the `/usr/local/bin/shutlid` symlink; run setup
   again from the new location and re-enable Launch at login.
+- Low Power Mode while the lid is closed changes the battery Energy Mode only; on AC the Energy Mode is left as it is.
 - Not feasible for the Mac App Store: the sandbox cannot run `sudo`.
 - `pmset disablesleep` is undocumented. It has been stable for over a decade,
   but Apple could change it. Everything that touches it is in one file,

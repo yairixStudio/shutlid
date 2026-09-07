@@ -5,7 +5,9 @@ final class KeepAwakeTests: XCTestCase {
     private let start = Date(timeIntervalSince1970: 1_700_000_000)
     private var clock = Date(timeIntervalSince1970: 1_700_000_000)
     private var onAC = true
+    private var lidClosed = false
     private var setupInstalled = true
+    private var store: MemoryStore!
     private var bootSession = "boot-A"
     private var power: FakePower!
     private var keepAwake: KeepAwake!
@@ -16,12 +18,15 @@ final class KeepAwakeTests: XCTestCase {
     override func setUp() {
         super.setUp()
         power = FakePower()
+        store = MemoryStore()
         clock = start
         onAC = true
+        lidClosed = false
         setupInstalled = true
         bootSession = "boot-A"
-        keepAwake = KeepAwake(power: power, defaults: MemoryStore(),
+        keepAwake = KeepAwake(power: power, defaults: store,
                               isOnAC: { [unowned self] in onAC },
+                              isLidClosed: { [unowned self] in lidClosed },
                               isSetupInstalled: { [unowned self] in setupInstalled },
                               bootSession: { [unowned self] in bootSession },
                               now: { [unowned self] in clock })
@@ -427,5 +432,127 @@ final class KeepAwakeTests: XCTestCase {
         try keepAwake.releaseForTermination(userInitiated: false)
         XCTAssertEqual(power.calls, [])
         XCTAssertFalse(keepAwake.status().requested)
+    }
+
+    // MARK: - Low Power Mode while the lid is closed
+
+    /// Turn on, close the lid, sync: the common path.
+    private func closeLidWhileOn() throws {
+        try keepAwake.turnOn(source: .cli)
+        lidClosed = true
+        try keepAwake.syncLowPower()
+    }
+
+    func testLidCloseWhileOnSwitchesToLowPower() throws {
+        try closeLidWhileOn()
+        XCTAssertEqual(power.modeCalls, [1])
+        XCTAssertEqual(power.batteryMode, 1)
+        XCTAssertEqual(keepAwake.status().lowPowerRestoresTo, 2)
+    }
+
+    func testLidOpenRestoresPreviousMode() throws {
+        try closeLidWhileOn()
+        lidClosed = false
+        try keepAwake.syncLowPower()
+        XCTAssertEqual(power.modeCalls, [1, 2])
+        XCTAssertEqual(power.batteryMode, 2)
+        XCTAssertNil(keepAwake.status().lowPowerRestoresTo)
+    }
+
+    func testLidCloseWhileOffDoesNothing() throws {
+        lidClosed = true
+        try keepAwake.syncLowPower()
+        XCTAssertEqual(power.modeCalls, [])
+    }
+
+    func testLidCloseWhenAlreadyLowPowerRemembersNothing() throws {
+        power.batteryMode = 1
+        try closeLidWhileOn()
+        XCTAssertEqual(power.modeCalls, [])
+        XCTAssertNil(keepAwake.status().lowPowerRestoresTo)
+    }
+
+    func testModeChangedByUserMeanwhileIsLeftAlone() throws {
+        try closeLidWhileOn()
+        power.batteryMode = 0  // changed in System Settings while the lid was closed
+        lidClosed = false
+        try keepAwake.syncLowPower()
+        XCTAssertEqual(power.modeCalls, [1], "no restore over the user's own change")
+        XCTAssertEqual(power.batteryMode, 0)
+        XCTAssertNil(keepAwake.status().lowPowerRestoresTo)
+    }
+
+    func testTurnOffRestoresLowPower() throws {
+        try closeLidWhileOn()
+        try keepAwake.turnOff(source: .cli)
+        XCTAssertEqual(power.modeCalls, [1, 2])
+        XCTAssertEqual(power.batteryMode, 2)
+        XCTAssertFalse(keepAwake.status().effective)
+    }
+
+    func testAutoOffAtLaunchRestoresLowPower() throws {
+        try keepAwake.turnOn(source: .cli, hours: 1)
+        lidClosed = true
+        try keepAwake.syncLowPower()
+        clock = hours(2)
+        try keepAwake.applyAtLaunch()
+        XCTAssertEqual(power.modeCalls, [1, 2])
+    }
+
+    func testSystemTerminationRestoresLowPower() throws {
+        try closeLidWhileOn()
+        try keepAwake.releaseForTermination(userInitiated: false)
+        XCTAssertEqual(power.modeCalls, [1, 2])
+    }
+
+    func testPauseSkipsLowPowerUntilItExpires() throws {
+        keepAwake.settings.lowPowerPausedUntil = hours(24)
+        try closeLidWhileOn()
+        XCTAssertEqual(power.modeCalls, [], "paused")
+        clock = hours(25)
+        try keepAwake.syncLowPower()
+        XCTAssertEqual(power.modeCalls, [1], "re-armed after the pause")
+    }
+
+    func testPermanentPauseNeverSwitches() throws {
+        keepAwake.settings.lowPowerPausedUntil = .distantFuture
+        try closeLidWhileOn()
+        clock = hours(24 * 365)
+        try keepAwake.syncLowPower()
+        XCTAssertEqual(power.modeCalls, [])
+    }
+
+    func testPausingWhileActiveRestoresAtOnce() throws {
+        try closeLidWhileOn()
+        keepAwake.settings.lowPowerPausedUntil = hours(24)
+        XCTAssertEqual(power.modeCalls, [1, 2])
+        XCTAssertNil(keepAwake.status().lowPowerRestoresTo)
+    }
+
+    func testRelaunchWithLidOpenRestoresRememberedMode() throws {
+        try closeLidWhileOn()
+        lidClosed = false
+        let relaunched = KeepAwake(power: power, defaults: store, isOnAC: { true }, isLidClosed: { false },
+                                   isSetupInstalled: { true }, bootSession: { "boot-A" }, now: { [unowned self] in clock })
+        try relaunched.syncLowPower()
+        XCTAssertEqual(power.modeCalls, [1, 2])
+        XCTAssertNil(relaunched.status().lowPowerRestoresTo)
+    }
+
+    func testLowPowerFailureRemembersNothing() throws {
+        power.modeError = setupRequired
+        try keepAwake.turnOn(source: .cli)
+        lidClosed = true
+        XCTAssertThrowsError(try keepAwake.syncLowPower())
+        XCTAssertNil(keepAwake.status().lowPowerRestoresTo)
+        XCTAssertTrue(keepAwake.status().effective, "keep-awake itself is unaffected")
+    }
+
+    func testLowPowerSettingText() {
+        XCTAssertEqual(Settings(mode: .always, autoOffHours: 24, restoreAfterRestart: false).lowPowerText, "on")
+        XCTAssertEqual(Settings(mode: .always, autoOffHours: 24, restoreAfterRestart: false,
+                                lowPowerPausedUntil: .distantFuture).lowPowerText, "off")
+        XCTAssertTrue(Settings(mode: .always, autoOffHours: 24, restoreAfterRestart: false,
+                               lowPowerPausedUntil: start).lowPowerText.hasPrefix("off until 2023-11-14T22:13:20"))
     }
 }

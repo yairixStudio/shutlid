@@ -8,14 +8,18 @@ public struct Status {
     public let onAC: Bool
     public let deadline: Date?
     public let autoOffHours: Int
+    /// The battery Energy Mode that Low Power will be restored to; nil when Low Power is not active.
+    public let lowPowerRestoresTo: Int?
 
-    public init(requested: Bool, effective: Bool, mode: Mode, onAC: Bool, deadline: Date?, autoOffHours: Int) {
+    public init(requested: Bool, effective: Bool, mode: Mode, onAC: Bool, deadline: Date?, autoOffHours: Int,
+                lowPowerRestoresTo: Int? = nil) {
         self.requested = requested
         self.effective = effective
         self.mode = mode
         self.onAC = onAC
         self.deadline = deadline
         self.autoOffHours = autoOffHours
+        self.lowPowerRestoresTo = lowPowerRestoresTo
     }
 
     /// Requested-and-waiting-for-power counts as on: the menu offers "Turn Off".
@@ -27,7 +31,7 @@ public struct Status {
         requested && !effective && mode == .onlyOnPower && !onAC
     }
 
-    /// Exactly four lines, labels padded to 12 columns, no trailing newline.
+    /// Four lines, labels padded to 12 columns, no trailing newline. A fifth line only while Low Power is active.
     public func cliText(now: Date) -> String {
         let effectiveText: String
         if waitingForPower {
@@ -40,20 +44,25 @@ public struct Status {
             effectiveText = effective ? "ON" : "OFF"
         }
         let modeText = mode == .always ? "always" : "only while connected to power"
-        return [
+        var lines = [
             line("Requested:", requested ? "ON" : "OFF"),
             line("Effective:", effectiveText),
             line("Mode:", modeText),
             line("Auto-off:", autoOffLine(now: now)),
-        ].joined(separator: "\n")
+        ]
+        if let lowPowerRestoresTo {
+            lines.append(line("Energy:", "low power (lid closed; restores to \(Self.energyModeText(lowPowerRestoresTo)))"))
+        }
+        return lines.joined(separator: "\n")
     }
 
     public func menuTitle(now: Date) -> String {
         if effective {
-            if !requested { return "● Keeping awake — turn-off failed" }
-            guard let deadline else { return "● Keeping awake — no auto-off" }
-            if deadline > now { return "● Keeping awake — auto-off in \(Self.remainingText(until: deadline, now: now))" }
-            return "● Keeping awake — auto-off expired"
+            let suffix = lowPowerRestoresTo == nil ? "" : " · low power"
+            if !requested { return "● Keeping awake — turn-off failed" + suffix }
+            guard let deadline else { return "● Keeping awake — no auto-off" + suffix }
+            if deadline > now { return "● Keeping awake — auto-off in \(Self.remainingText(until: deadline, now: now))" + suffix }
+            return "● Keeping awake — auto-off expired" + suffix
         }
         if waitingForPower { return "◐ On battery — keeps awake when plugged in" }
         return "○ Normal sleep"
@@ -72,6 +81,15 @@ public struct Status {
     /// "24h", or "never" for 0. Used by the status text, the menu and the log.
     public static func autoOffText(hours: Int) -> String {
         hours == 0 ? "never" : "\(hours)h"
+    }
+
+    /// The battery Energy Mode names as System Settings shows them.
+    public static func energyModeText(_ mode: Int) -> String {
+        switch mode {
+        case 1: return "low"
+        case 2: return "high"
+        default: return "automatic"
+        }
     }
 
     private func autoOffLine(now: Date) -> String {

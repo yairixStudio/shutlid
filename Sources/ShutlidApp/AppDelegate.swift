@@ -10,7 +10,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var settingsWindow: SettingsWindow?
     private var autoOffTimer: DispatchSourceTimer?
     private var terminationSignal: DispatchSourceSignal?
+    private var sampler: DispatchSourceTimer?
     private var released = false
+    private var warnedSetupOutdated = false
+    /// The CLI ships next to this executable in Contents/MacOS.
+    private var cliPath: String {
+        Bundle.main.executableURL!.deletingLastPathComponent().appendingPathComponent("shutlid").path
+    }
 
     // MARK: - Launch and termination
 
@@ -19,6 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.autoenablesItems = false
         statusItem.menu = menu
         try? keepAwake.applyAtLaunch()  // failures are logged by the core; the icon and menu show reality
+        syncLowPower(alert: false)
         refresh()
         var token: Int32 = 0
         notify_register_dispatch(Shutlid.changedNotification, &token, .main) { [weak self] _ in
@@ -30,6 +37,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         PowerSource.observeChanges { [weak self] in
             guard let self else { return }
             try? self.keepAwake.powerSourceChanged()  // failures are logged by the core
+            self.refresh()
+        }
+        Lid.observeChanges { [weak self] _ in
+            guard let self else { return }
+            self.syncLowPower(alert: true)
             self.refresh()
         }
         // kill/pkill (SIGTERM) ends the app through the normal path, so the flag is released as on Quit.
@@ -67,6 +79,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func refresh() {
         let status = keepAwake.status()
         statusItem.button?.image = icon(for: status)
+        if status.effective { startSampler() } else { sampler?.cancel(); sampler = nil }
         autoOffTimer?.cancel()
         autoOffTimer = nil
         guard let deadline = status.deadline else { return }
@@ -76,6 +89,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         timer.setEventHandler { [weak self] in self?.autoOff() }
         timer.resume()
         autoOffTimer = timer
+    }
+
+    /// One diagnostics line every five minutes while keeping awake (lid, power, battery temperature, thermal
+    /// state, load, energy mode), so a closed-lid session can be inspected afterwards with `shutlid log`.
+    private func startSampler() {
+        guard sampler == nil else { return }
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(wallDeadline: .now(), repeating: .seconds(300), leeway: .seconds(30))
+        timer.setEventHandler { Log.sample(Diagnostics.sample().text) }
+        timer.resume()
+        sampler = timer
+    }
+
+    /// Low Power while the lid is closed. A rule installed by an older setup lacks the energy-mode
+    /// commands; say so once, with the command to run.
+    private func syncLowPower(alert: Bool) {
+        do {
+            try keepAwake.syncLowPower()
+        } catch let error as PowerError where error.kind == .setupRequired {
+            guard alert, !warnedSetupOutdated else { return }
+            warnedSetupOutdated = true
+            showAlert("Low Power Mode while the lid is closed needs setup to run again.",
+                      "This version adds one more permission for the battery Energy Mode. In Terminal:\nsudo \"\(cliPath)\" setup")
+        } catch {
+            // Logged by the core; the status shows reality.
+        }
     }
 
     private func autoOff() {
@@ -122,6 +161,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func turnOn() {
         do {
             try keepAwake.turnOn(source: .gui)
+            syncLowPower(alert: true)
         } catch let error as PowerError where error.kind == .setupRequired {
             runSetupThenTurnOn()
         } catch {
@@ -174,8 +214,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         alert.addButton(withTitle: "Cancel")
         NSApp.activate()
         guard alert.runModal() == .alertFirstButtonReturn else { return }
-        // The CLI ships next to this executable in Contents/MacOS. The script quotes the path itself.
-        let cliPath = Bundle.main.executableURL!.deletingLastPathComponent().appendingPathComponent("shutlid").path
+        let cliPath = self.cliPath  // captured by the closure below
+        // The script quotes the CLI path itself.
         let script = "do shell script (quoted form of item 1 of argv) & \" setup\" with administrator privileges"
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
@@ -210,6 +250,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         do {
             try keepAwake.turnOn(source: .gui)
+            syncLowPower(alert: false)
         } catch {
             showAlert("Setup finished, but Shutlid could not turn keep-awake on.", String(describing: error))
         }

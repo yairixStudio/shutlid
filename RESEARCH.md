@@ -229,3 +229,36 @@ from the kernel every time; nothing reconciles it.
 | Deadline passes while app not running | Next launch of the app or `status` shows it expired; app turns OFF at launch. |
 | Boot-reset daemon disabled by user in System Settings | Flag may persist a reboot; `status` shows reality. Documented. |
 | Power mode "only on AC", AC unplugged | Event handler turns the flag OFF, keeps `Requested: ON`; re-applies on replug. |
+
+## 10. Heat: Low Power Mode while the lid is closed (added 2026-09-07)
+
+The only system-level lever against heat is the Energy Mode from System
+Settings › Battery. `pmset -b powermode N` sets it for battery power (0
+automatic, 1 low power, 2 high power; `-c` for the charger). It is the same key
+as `lowpowermode` (`kIOPMLowPowerModeKey` in `pmset.m`), absent from the man
+page like `disablesleep`, root-only to set, readable without root from
+`pmset -g custom`. Low Power caps CPU and GPU power, which is what lowers heat;
+the cost is a slower job.
+
+Decisions: battery only (the bag is the battery case; on AC at a desk the user
+wants full speed, and it keeps the sudoers rule at five literal commands);
+applied on the lid-close event and restored on lid open, turn-off, quit, and at
+the next launch if the app died; never restored over a value the user changed
+meanwhile; failure direction is "cooler and slower", never hotter. A pause in
+Settings re-arms itself after 1 to 24 hours unless made permanent.
+
+Lid events: the kernel's `kIOPMMessageClamshellStateChange` message through
+`IOServiceAddInterestNotification` (public in IOKit/pwr_mgt/IOPM.h), and
+`AppleClamshellState` for the current value. No polling.
+
+Measurement: the battery pack reports its own temperature in the IO registry
+(`AppleSmartBatteryPack`, `BatteryData.Temperature`, hundredths of a degree;
+30.7 °C idle on this M4 Pro). It is not a documented key, so a sample prints
+`n/a` if it disappears. The thermal pressure level (`ProcessInfo.thermalState`)
+and `isLowPowerModeEnabled` are documented. One sample line every five minutes
+while keeping awake is the one periodic timer the owner asked for.
+
+Rejected: Low Power for the whole time keep-awake is on (slows the Mac with the
+lid open); reading SMC temperature keys (private, per-chip); throttling the
+user's processes ourselves (wrong layer); thermal monitoring that acts on its
+own (the brief forbids reconciliation and statistics beyond one log line).
