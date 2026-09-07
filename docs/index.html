@@ -3,17 +3,22 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Shutlid — keep your MacBook awake with the lid closed</title>
-<meta name="description" content="Shutlid keeps a MacBook running with the lid closed, on battery, with no external display. A menu-bar switch for you and a three-command CLI for AI agents. Free, open source, zero dependencies.">
+<title>Shutlid — Keep Your MacBook Awake With the Lid Closed</title>
+<meta name="description" content="Shutlid keeps a MacBook running with the lid closed, on battery, with no external display. A menu-bar switch for you, a three-command CLI for AI agents. Free, open source, zero dependencies.">
 <link rel="canonical" href="https://yairixstudio.github.io/shutlid/">
 <meta name="robots" content="index, follow">
-<meta name="theme-color" content="#0f172a">
+<meta name="author" content="Yair Amsalem">
+<meta name="theme-color" content="#0b1120">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="favicon-16.png">
 <link rel="icon" type="image/png" sizes="64x64" href="favicon.png">
-<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-title" content="Shutlid">
 
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Shutlid">
-<meta property="og:title" content="Shutlid — keep your MacBook awake with the lid closed">
+<meta property="og:locale" content="en_US">
+<meta property="og:title" content="Shutlid — Keep Your MacBook Awake With the Lid Closed">
 <meta property="og:description" content="Lid closed, in a bag, on battery: your processes, SSH sessions and AI agents keep running. One menu-bar switch, three CLI commands, macOS, open source.">
 <meta property="og:url" content="https://yairixstudio.github.io/shutlid/">
 <meta property="og:image" content="https://yairixstudio.github.io/shutlid/og.png">
@@ -21,7 +26,7 @@
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="Shutlid: keep your MacBook awake with the lid closed">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Shutlid — keep your MacBook awake with the lid closed">
+<meta name="twitter:title" content="Shutlid — Keep Your MacBook Awake With the Lid Closed">
 <meta name="twitter:description" content="Lid closed, in a bag, on battery: your processes, SSH sessions and AI agents keep running. One menu-bar switch, three CLI commands, macOS, open source.">
 <meta name="twitter:image" content="https://yairixstudio.github.io/shutlid/og.png">
 
@@ -43,136 +48,556 @@
   "codeRepository": "https://github.com/yairixStudio/shutlid"
 }
 </script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "Does Shutlid keep a MacBook awake with the lid closed, on battery, with no external monitor?",
+      "acceptedAnswer": { "@type": "Answer", "text": "That is the scenario it is built for. It sets the same power-management flag the kernel checks before any sleep, so no display or keyboard needs to be attached. The on/off toggle has been verified against the real kernel flag on an M4 Pro; the physical closed-lid battery test is tracked in MANUAL_TESTING.md and reported there as it is run." }
+    },
+    {
+      "@type": "Question",
+      "name": "Does Shutlid ask for my password every time?",
+      "acceptedAnswer": { "@type": "Answer", "text": "No. A one-time administrator authorization installs a sudo rule scoped to exactly two commands: turn the flag on, turn it off. After that, the app and the CLI never see a password again." }
+    },
+    {
+      "@type": "Question",
+      "name": "Is the underlying mechanism safe and reviewable?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Yes. Every privileged call is Apple's own pmset binary, isolated in a single source file. No custom code ever runs as root. The full investigation, including rejected approaches, is public in RESEARCH.md." }
+    },
+    {
+      "@type": "Question",
+      "name": "Will this drain my battery or overheat my MacBook?",
+      "acceptedAnswer": { "@type": "Answer", "text": "A closed laptop in a bag cannot shed heat as well as an open one, and while keep-awake is on, low-battery emergency sleep is disabled too. Auto-off is on by default (24 hours) as the safety net, adjustable down to 1 hour or off entirely." }
+    },
+    {
+      "@type": "Question",
+      "name": "Can an AI coding agent control Shutlid without a GUI?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Yes. The CLI is the agent interface: shutlid on, shutlid off and shutlid status, with stable exit codes and no interactive prompts after setup." }
+    },
+    {
+      "@type": "Question",
+      "name": "How is this different from caffeinate or a virtual-display trick?",
+      "acceptedAnswer": { "@type": "Answer", "text": "caffeinate and sleep assertions stop idle sleep but not the sleep macOS triggers when the lid closes. A virtual display can fool clamshell mode but still requires AC power and stacks extra machinery. Shutlid uses the one setting that vetoes lid-close sleep directly, with nothing else running." }
+    },
+    {
+      "@type": "Question",
+      "name": "What does Shutlid cost, and is it open source?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Shutlid is free and open source under the MIT license. The full source, including the research behind it, is on GitHub." }
+    }
+  ]
+}
+</script>
 
 <style>
   :root {
     color-scheme: light dark;
-    --bg: #ffffff; --fg: #111827; --muted: #4b5563; --line: #e5e7eb;
-    --accent: #b45309; --accent-fg: #ffffff; --code-bg: #f3f4f6; --card: #f9fafb;
+    --bg: #ffffff; --bg-soft: #f8fafc; --fg: #0f172a; --muted: #55606e; --line: #e2e8f0;
+    --accent: #b45309; --accent-2: #c2410c; --accent-fg: #ffffff; --code-bg: #f1f5f9; --card: #ffffff;
+    --shadow: 0 1px 2px rgba(15,23,42,.04), 0 8px 24px -12px rgba(15,23,42,.12);
+    --ring: rgba(180,83,9,.35);
+    --dot-on: #16a34a; --dot-wait: #b45309;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #0f172a; --fg: #e5e7eb; --muted: #9ca3af; --line: #1f2937;
-      --accent: #f59e0b; --accent-fg: #111827; --code-bg: #111827; --card: #131c31;
+      --bg: #0b1120; --bg-soft: #0f172a; --fg: #e6eaf2; --muted: #93a1b5; --line: #223047;
+      --accent: #f59e0b; --accent-2: #fb923c; --accent-fg: #0b1120; --code-bg: #0f172a; --card: #101a2e;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 12px 32px -12px rgba(0,0,0,.55);
+      --ring: rgba(245,158,11,.35);
+      --dot-on: #22c55e; --dot-wait: #f59e0b;
     }
   }
   * { box-sizing: border-box; }
-  html { background: var(--bg); }
+  html { background: var(--bg); scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } * { animation: none !important; transition: none !important; } }
   body {
     margin: 0; color: var(--fg); background: var(--bg);
-    font: 17px/1.6 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font: 17px/1.65 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
   }
-  main { max-width: 720px; margin: 0 auto; padding: 56px 24px 72px; }
-  header { display: flex; align-items: center; gap: 20px; margin-bottom: 8px; }
-  header img { width: 96px; height: 96px; border-radius: 22px; }
-  h1 { font-size: 2.4rem; line-height: 1.1; margin: 0; letter-spacing: -0.02em; }
-  .tagline { font-size: 1.25rem; color: var(--muted); margin: 6px 0 0; }
-  .actions { display: flex; flex-wrap: wrap; gap: 12px; margin: 28px 0 40px; }
-  .btn {
-    display: inline-block; padding: 12px 20px; border-radius: 10px; text-decoration: none;
-    font-weight: 600; border: 1px solid var(--line); color: var(--fg);
-  }
-  .btn.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
-  h2 { font-size: 1.35rem; margin: 40px 0 12px; letter-spacing: -0.01em; }
-  p { margin: 0 0 14px; }
-  ul { padding-left: 22px; margin: 0 0 14px; }
-  li { margin: 4px 0; }
-  pre, code { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 0.93em; }
-  pre { background: var(--code-bg); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; overflow-x: auto; margin: 0 0 14px; }
-  code { background: var(--code-bg); padding: 1px 5px; border-radius: 5px; }
-  pre code { background: none; padding: 0; }
-  .note { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin: 0 0 14px; }
   a { color: inherit; }
-  .muted { color: var(--muted); font-size: 0.95rem; margin-top: -24px; }
-  footer { margin-top: 56px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.95rem; }
-  footer a { margin-right: 16px; }
+  img { max-width: 100%; display: block; }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 24px; }
+  code, pre, .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  code { background: var(--code-bg); padding: 1px 6px; border-radius: 5px; font-size: .92em; }
+  pre code { background: none; padding: 0; }
+
+  /* Nav */
+  nav.top {
+    position: sticky; top: 0; z-index: 20; backdrop-filter: saturate(1.6) blur(14px);
+    background: color-mix(in srgb, var(--bg) 78%, transparent); border-bottom: 1px solid var(--line);
+  }
+  nav.top .wrap { display: flex; align-items: center; justify-content: space-between; height: 60px; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 1.05rem; text-decoration: none; }
+  .brand img { width: 26px; height: 26px; border-radius: 7px; }
+  .navlinks { display: flex; align-items: center; gap: 26px; font-size: .95rem; color: var(--muted); }
+  .navlinks a { text-decoration: none; }
+  .navlinks a:hover { color: var(--fg); }
+  .navcta { display: flex; align-items: center; gap: 10px; }
+  @media (max-width: 720px) { .navlinks { display: none; } }
+
+  /* Buttons */
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px; padding: 11px 18px; border-radius: 10px;
+    text-decoration: none; font-weight: 600; font-size: .95rem; border: 1px solid var(--line); color: var(--fg);
+    transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease;
+  }
+  .btn:hover { transform: translateY(-1px); box-shadow: var(--shadow); }
+  .btn.primary { background: linear-gradient(180deg, var(--accent), var(--accent-2)); color: var(--accent-fg); border-color: transparent; }
+  .btn.small { padding: 7px 12px; font-size: .85rem; border-radius: 8px; }
+  .btn svg { width: 16px; height: 16px; flex: none; }
+
+  /* Hero */
+  .hero { padding: 76px 0 40px; }
+  .hero .wrap { display: grid; grid-template-columns: 1.1fr .9fr; gap: 56px; align-items: center; }
+  @media (max-width: 860px) { .hero .wrap { grid-template-columns: 1fr; gap: 40px; } .hero { padding-top: 44px; } }
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: 8px; font-size: .82rem; font-weight: 600; letter-spacing: .02em;
+    color: var(--accent-2); background: color-mix(in srgb, var(--accent) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); border-radius: 999px; padding: 5px 12px; margin-bottom: 18px;
+  }
+  h1 { font-size: clamp(2.1rem, 4.6vw, 3.1rem); line-height: 1.08; margin: 0 0 16px; letter-spacing: -0.02em; font-weight: 800; }
+  h1 .accent { background: linear-gradient(90deg, var(--accent), var(--accent-2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .lede { font-size: 1.15rem; color: var(--muted); max-width: 46ch; margin: 0 0 28px; }
+  .cta-row { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 14px; }
+  .fineprint { font-size: .88rem; color: var(--muted); margin: 0 0 22px; }
+  .fineprint code { font-size: .85em; }
+  .badges { display: flex; flex-wrap: wrap; gap: 8px; }
+  .badge {
+    font-size: .78rem; font-weight: 600; color: var(--muted); background: var(--bg-soft);
+    border: 1px solid var(--line); border-radius: 999px; padding: 5px 11px;
+  }
+
+  /* Hero visual: glow + macOS menu mock */
+  .hero-visual { position: relative; display: flex; justify-content: center; }
+  .glow {
+    position: absolute; width: 340px; height: 340px; border-radius: 50%; z-index: 0;
+    background: radial-gradient(circle, color-mix(in srgb, var(--accent) 38%, transparent), transparent 70%);
+    filter: blur(6px);
+  }
+  .menu-mock {
+    position: relative; z-index: 1; width: 264px; border-radius: 12px; overflow: hidden;
+    background: color-mix(in srgb, var(--card) 92%, transparent); border: 1px solid var(--line);
+    box-shadow: var(--shadow); backdrop-filter: blur(10px);
+    animation: rise .6s ease both;
+  }
+  .menu-mock .bar {
+    display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-bottom: 1px solid var(--line);
+    font-size: .78rem; color: var(--muted); background: var(--bg-soft);
+  }
+  .menu-mock .bar .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dot-on); box-shadow: 0 0 0 3px color-mix(in srgb, var(--dot-on) 25%, transparent); }
+  .menu-mock ul { list-style: none; margin: 0; padding: 6px 0; }
+  .menu-mock li { padding: 8px 14px; font-size: .88rem; }
+  .menu-mock li.title { font-weight: 600; }
+  .menu-mock li.item { cursor: default; }
+  .menu-mock hr { border: none; border-top: 1px solid var(--line); margin: 4px 0; }
+  @keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+  /* Sections */
+  section { padding: 64px 0; }
+  section.alt { background: var(--bg-soft); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+  .kicker { font-size: .8rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--accent-2); margin: 0 0 8px; }
+  h2 { font-size: clamp(1.5rem, 2.6vw, 1.9rem); margin: 0 0 12px; letter-spacing: -0.01em; font-weight: 750; }
+  .section-lede { color: var(--muted); max-width: 62ch; margin: 0 0 36px; font-size: 1.02rem; }
+
+  /* Steps */
+  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; }
+  @media (max-width: 780px) { .steps { grid-template-columns: 1fr; } }
+  .step { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 22px; box-shadow: var(--shadow); }
+  .step .num {
+    display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 9px;
+    background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent-2); font-weight: 800; font-size: .9rem; margin-bottom: 14px;
+  }
+  .step h3 { margin: 0 0 6px; font-size: 1.05rem; }
+  .step p { margin: 0; color: var(--muted); font-size: .95rem; }
+
+  /* Feature grid */
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+  @media (max-width: 860px) { .grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 560px) { .grid { grid-template-columns: 1fr; } }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 20px; }
+  .card .icon {
+    width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center;
+    background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent-2); margin-bottom: 12px;
+  }
+  .card .icon svg { width: 19px; height: 19px; }
+  .card h3 { margin: 0 0 6px; font-size: 1.02rem; }
+  .card p { margin: 0; color: var(--muted); font-size: .93rem; }
+
+  /* Terminal window */
+  .window {
+    background: var(--code-bg); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow);
+  }
+  .window .titlebar { display: flex; align-items: center; gap: 7px; padding: 10px 12px; background: var(--bg-soft); border-bottom: 1px solid var(--line); }
+  .window .tl { width: 11px; height: 11px; border-radius: 50%; }
+  .tl.r { background: #ff5f57; } .tl.y { background: #febc2e; } .tl.g { background: #28c840; }
+  .window .titlebar span { margin-left: 8px; font-size: .78rem; color: var(--muted); }
+  .window pre { margin: 0; padding: 18px 20px; overflow-x: auto; font-size: .9rem; line-height: 1.7; }
+  .window .prompt { color: var(--accent-2); }
+  .window .cmt { color: var(--muted); }
+  .window .out { color: var(--fg); opacity: .92; }
+
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; align-items: start; }
+  @media (max-width: 860px) { .two-col { grid-template-columns: 1fr; } }
+
+  /* Comparison table */
+  .tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 14px; background: var(--card); }
+  table { width: 100%; border-collapse: collapse; font-size: .92rem; min-width: 560px; }
+  th, td { text-align: left; padding: 12px 16px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  thead th { color: var(--muted); font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; font-weight: 700; background: var(--bg-soft); }
+  tbody tr:last-child td { border-bottom: none; }
+  td.yes { color: var(--dot-on); font-weight: 700; }
+  td.no { color: var(--muted); }
+  .rowlabel { font-weight: 650; }
+
+  /* Security list */
+  .checklist { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; }
+  .checklist li { display: flex; gap: 12px; }
+  .checklist svg { flex: none; width: 20px; height: 20px; color: var(--dot-on); margin-top: 2px; }
+  .checklist strong { display: block; margin-bottom: 2px; }
+  .checklist span.d { color: var(--muted); font-size: .95rem; }
+
+  /* FAQ */
+  details.faq { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 4px 18px; margin-bottom: 10px; }
+  details.faq summary { cursor: pointer; padding: 15px 0; font-weight: 650; list-style: none; display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+  details.faq summary::-webkit-details-marker { display: none; }
+  details.faq summary::after { content: "+"; font-size: 1.3rem; color: var(--muted); transition: transform .15s ease; flex: none; }
+  details.faq[open] summary::after { content: "–"; }
+  details.faq p { margin: 0 0 16px; color: var(--muted); }
+
+  .note {
+    background: color-mix(in srgb, var(--accent) 10%, var(--card)); border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line));
+    border-radius: 12px; padding: 16px 18px; margin: 0 0 14px; font-size: .95rem;
+  }
+
+  /* CTA band */
+  .cta-band { text-align: center; padding: 68px 0; }
+  .cta-band h2 { margin-bottom: 10px; }
+  .cta-band p { color: var(--muted); margin: 0 0 26px; }
+  .cta-band .cta-row { justify-content: center; }
+
+  footer { border-top: 1px solid var(--line); padding: 32px 0 48px; color: var(--muted); font-size: .92rem; }
+  footer .wrap { display: flex; flex-wrap: wrap; gap: 18px; justify-content: space-between; align-items: center; }
+  footer .links { display: flex; flex-wrap: wrap; gap: 18px; }
+  footer a { text-decoration: none; }
+  footer a:hover { color: var(--fg); }
+
+  .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; }
 </style>
 </head>
 <body>
-<main>
-  <header>
-    <img src="icon.png" alt="Shutlid icon: a closed laptop lid with a small sun above it" width="96" height="96">
-    <div>
-      <h1>Shutlid</h1>
-      <p class="tagline">Keep your MacBook awake with the lid closed.</p>
+
+<nav class="top">
+  <div class="wrap">
+    <a class="brand" href="#top">
+      <img src="icon.png" width="26" height="26" alt="">
+      Shutlid
+    </a>
+    <div class="navlinks">
+      <a href="#how-it-works">How it works</a>
+      <a href="#features">Features</a>
+      <a href="#cli">CLI</a>
+      <a href="#compare">Compare</a>
+      <a href="#faq">FAQ</a>
     </div>
-  </header>
-
-  <p>Lid closed, in a bag, on battery, no external display: your processes, SSH
-  sessions, dev servers and AI coding agents keep running as if the lid were
-  open. One switch in the menu bar for you, three commands for your agents.
-  Free, open source, Swift, zero dependencies.</p>
-
-  <div class="actions">
-    <a class="btn primary" href="https://github.com/yairixStudio/shutlid/releases">Download for macOS</a>
-    <a class="btn" href="https://github.com/yairixStudio/shutlid">View on GitHub</a>
+    <div class="navcta">
+      <a class="btn small" href="https://github.com/yairixStudio/shutlid">GitHub</a>
+    </div>
   </div>
-  <p class="muted">No release yet: the first build is published after the closed-lid test on the
-  M4 (see the status below). Until then, build from source with
-  <code>scripts/build.sh</code>.</p>
+</nav>
 
-  <h2>Three commands</h2>
-<pre><code>shutlid on        # keep the Mac awake, lid closed or not
-shutlid off       # back to normal sleep
-shutlid status    # what was requested, and what macOS is really doing</code></pre>
+<header class="hero" id="top">
+  <div class="wrap">
+    <div>
+      <span class="eyebrow">Free &amp; open source · MIT license</span>
+      <h1>Keep your MacBook <span class="accent">awake with the lid closed.</span></h1>
+      <p class="lede">Lid closed, in a bag, on battery, no external display: your processes, SSH
+        sessions, dev servers and AI coding agents keep running as if the lid were open.
+        One switch in the menu bar for you, three commands for your agents.</p>
+      <div class="cta-row">
+        <a class="btn primary" href="https://github.com/yairixStudio/shutlid/releases">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+          Download for macOS
+        </a>
+        <a class="btn" href="https://github.com/yairixStudio/shutlid">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.34-3.37-1.34-.46-1.16-1.11-1.47-1.11-1.47-.9-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.9 1.52 2.34 1.08 2.91.83.09-.65.35-1.09.63-1.34-2.22-.25-4.56-1.11-4.56-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.02a9.5 9.5 0 0 1 5 0c1.91-1.29 2.75-1.02 2.75-1.02.55 1.38.2 2.4.1 2.65.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.68-4.57 4.93.36.31.68.92.68 1.85v2.74c0 .27.18.58.69.48A10 10 0 0 0 12 2Z"/></svg>
+          View source
+        </a>
+      </div>
+      <p class="fineprint">No release yet — the first build ships right after the closed-lid battery test
+        on the target M4. Until then, build it yourself: <code>scripts/build.sh</code>.</p>
+      <div class="badges">
+        <span class="badge">macOS 14+</span>
+        <span class="badge">Apple Silicon</span>
+        <span class="badge">Zero dependencies</span>
+        <span class="badge">Swift, ~1,300 lines</span>
+        <span class="badge">No telemetry, no network</span>
+      </div>
+    </div>
+    <div class="hero-visual">
+      <div class="glow" aria-hidden="true"></div>
+      <div class="menu-mock" role="img" aria-label="Shutlid menu-bar dropdown showing Keeping awake, auto-off in 23 hours 12 minutes, with Turn Off, Settings, About and Quit">
+        <div class="bar"><span class="dot"></span> Shutlid</div>
+        <ul>
+          <li class="title">● Keeping awake — auto-off in 23h 12m</li>
+          <li class="item">Turn Off</li>
+          <hr>
+          <li class="item">Settings…</li>
+          <li class="item">About</li>
+          <li class="item">Quit</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</header>
 
-  <p><code>status</code> always reports reality, read fresh from the kernel:</p>
-<pre><code>Requested:  ON
+<section id="how-it-works">
+  <div class="wrap">
+    <p class="kicker">How it works</p>
+    <h2>One flag the kernel already trusts</h2>
+    <p class="section-lede"><code>caffeinate</code> and sleep assertions stop idle sleep, but not the sleep
+      macOS triggers the instant the lid clicks shut. Shutlid uses the one setting the kernel checks before
+      every kind of sleep, including that one.</p>
+    <div class="steps">
+      <div class="step">
+        <div class="num">1</div>
+        <h3>Turn on</h3>
+        <p>From the menu bar, or <code>shutlid on</code> from an agent. One admin authorization the first time; never again after that.</p>
+      </div>
+      <div class="step">
+        <div class="num">2</div>
+        <h3>Close the lid</h3>
+        <p>The system-wide sleep veto is already set. No external display, keyboard or mouse required — on battery or AC.</p>
+      </div>
+      <div class="step">
+        <div class="num">3</div>
+        <h3>Auto-off has your back</h3>
+        <p>24 hours by default, or off entirely with <code>shutlid off</code>. A restart always returns to normal sleep.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="alt" id="features">
+  <div class="wrap">
+    <p class="kicker">Built to be boring</p>
+    <h2>Small, reviewable, hard to break</h2>
+    <p class="section-lede">Reliability first. One file talks to macOS power management. Everything else is
+      plain, readable Swift with no dependencies to rot.</p>
+    <div class="grid">
+      <div class="card">
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-11V5l-8-3-8 3v6c0 7 8 11 8 11Z"/></svg></div>
+        <h3>Isolated privilege</h3>
+        <p>Setup installs a sudo rule scoped to exactly two commands. After that, no custom code ever runs as root.</p>
+      </div>
+      <div class="card">
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v4l3 3M21 12a9 9 0 1 1-9-9"/></svg></div>
+        <h3>Auto-off safety net</h3>
+        <p>24 hours by default, adjustable from 1 hour to never. A forgotten laptop does not stay awake forever.</p>
+      </div>
+      <div class="card">
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 17l6-6-6-6M12 19h8"/></svg></div>
+        <h3>Built for AI agents</h3>
+        <p>Three commands, stable exit codes, no GUI automation and no password prompts after setup.</p>
+      </div>
+      <div class="card">
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3a9 9 0 1 0 9 9"/><path d="M12 3v9l6 3"/></svg></div>
+        <h3>Restarts to normal</h3>
+        <p>A reboot always returns to normal sleep by default, whether or not the app is even opened.</p>
+      </div>
+      <div class="card">
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 12l2 2 4-4M21 12a9 9 0 1 1-9-9"/></svg></div>
+        <h3>Honest status, always</h3>
+        <p><code>status</code> reads the kernel fresh every time. If macOS isn't preventing sleep, it says so.</p>
+      </div>
+      <div class="card">
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h7"/></svg></div>
+        <h3>~1,300 lines, zero deps</h3>
+        <p>Swift Package Manager, no Xcode project, no third-party packages. Understandable in fifteen minutes.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="cli">
+  <div class="wrap">
+    <p class="kicker">For humans and agents alike</p>
+    <h2>Three commands, one honest status line</h2>
+    <div class="two-col">
+      <div>
+        <p class="section-lede" style="margin-bottom:20px">The CLI is the agent interface: no GUI automation,
+          no interactive prompts after the one-time setup. Results go to stdout, errors to stderr, and exit
+          codes are documented and stable.</p>
+        <div class="window">
+          <div class="titlebar"><span class="tl r"></span><span class="tl y"></span><span class="tl g"></span><span>zsh — shutlid</span></div>
+          <pre><code><span class="cmt"># an agent, mid-task</span>
+<span class="prompt">$</span> shutlid on
+<span class="out">Requested:  ON
 Effective:  ON
 Mode:       always
-Auto-off:   in 23h 12m</code></pre>
+Auto-off:   in 23h 59m</span>
 
-  <h2>Built for AI agents</h2>
-  <p>No GUI automation and no password prompts after a one-time setup. Exit
-  codes are stable: <code>status</code> exits 0 while keeping awake and 1
-  otherwise.</p>
-<pre><code>User:  Keep my Mac awake, I'm closing the lid.
-Agent: shutlid on
-...
-User:  You can let it sleep now.
-Agent: shutlid off</code></pre>
+<span class="cmt"># hours later, job done</span>
+<span class="prompt">$</span> shutlid off
+<span class="out">Requested:  OFF
+Effective:  OFF
+Mode:       always
+Auto-off:   24h</span></code></pre>
+        </div>
+      </div>
+      <div>
+        <div class="window" style="margin-bottom:20px">
+          <div class="titlebar"><span class="tl r"></span><span class="tl y"></span><span class="tl g"></span><span>usage</span></div>
+          <pre><code><span class="out">shutlid on [--for &lt;hours&gt;]
+shutlid off
+shutlid status
+shutlid setup
+shutlid log</span></code></pre>
+        </div>
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th>Command</th><th>0</th><th>1</th><th>2</th></tr></thead>
+            <tbody>
+              <tr><td class="rowlabel">on, off</td><td>done</td><td>error</td><td>setup required</td></tr>
+              <tr><td class="rowlabel">status</td><td>keeping awake</td><td>normal sleep</td><td>—</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
 
-  <h2>How it works</h2>
-  <p><code>caffeinate</code> and sleep assertions cannot stop a MacBook from
-  sleeping when the lid closes. Shutlid uses the one thing that can, the
-  system-wide <code>pmset disablesleep</code> flag, which the kernel treats as
-  a veto on every kind of sleep. Because that flag needs root, setup installs a
-  sudo rule scoped to exactly two commands (turn the flag on, turn it off), a
-  boot-time reset so a restart always returns to normal sleep, and a command
-  line link. No daemon, no helper, no custom code ever runs as root.</p>
-  <p>Read the full investigation, including what was tried and rejected, in
-  <a href="https://github.com/yairixStudio/shutlid/blob/main/RESEARCH.md">RESEARCH.md</a>.</p>
+<section class="alt" id="compare">
+  <div class="wrap">
+    <p class="kicker">Why not just…</p>
+    <h2>How Shutlid compares</h2>
+    <p class="section-lede">Sourced from the full write-up in
+      <a href="https://github.com/yairixStudio/shutlid/blob/main/RESEARCH.md">RESEARCH.md</a>, including
+      every approach that was tried and rejected.</p>
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr><th>Approach</th><th>Survives lid close</th><th>Works on battery</th><th>Needs a display/peripheral</th><th>Extra moving parts</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="rowlabel">Shutlid</td><td class="yes">Yes</td><td class="yes">Yes</td><td class="no">No</td><td class="no">None</td></tr>
+          <tr><td class="rowlabel"><code>caffeinate</code> / sleep assertions</td><td class="no">No</td><td>—</td><td class="no">No</td><td class="no">None</td></tr>
+          <tr><td class="rowlabel">Apple clamshell mode</td><td class="yes">Yes</td><td class="no">No</td><td>Display + AC + input</td><td class="no">None</td></tr>
+          <tr><td class="rowlabel">Virtual-display trick</td><td class="yes">Yes</td><td class="no">No</td><td class="no">No</td><td>Mouse jiggle, assertions, virtual display</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
 
-  <h2>Safety first</h2>
-  <ul>
-    <li><strong>Auto-off.</strong> Keep-awake turns itself off after 24 hours by default (1h, 4h, 8h, 24h or never). A forgotten laptop does not stay awake forever.</li>
-    <li><strong>Normal sleep after every restart.</strong> Unless you opt in to restoring the previous state.</li>
-    <li><strong>Honest status.</strong> If macOS is not preventing sleep, Shutlid says so, whatever was requested.</li>
-    <li><strong>Heat and battery.</strong> A closed MacBook in a bag cannot shed heat, and while keep-awake is on the low-battery sleep is off too. Use it for the light jobs it is meant for.</li>
-  </ul>
+<section id="security">
+  <div class="wrap">
+    <p class="kicker">Security model, stated plainly</p>
+    <h2>What "one-time authorization" actually means</h2>
+    <ul class="checklist">
+      <li>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg>
+        <div><strong>Only two commands, ever.</strong><span class="d"> The sudo rule matches arguments literally — it permits turning the flag on or off, nothing else.</span></div>
+      </li>
+      <li>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg>
+        <div><strong>Passwords are never seen, stored or piped.</strong><span class="d"> Setup runs through the standard macOS administrator dialog.</span></div>
+      </li>
+      <li>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg>
+        <div><strong>Resetting always works.</strong><span class="d"> <code>shutlid off</code>, <code>sudo pmset disablesleep 0</code>, or a reboot returns the Mac to normal sleep.</span></div>
+      </li>
+      <li>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg>
+        <div><strong>Nothing phones home.</strong><span class="d"> No network access, no accounts, no analytics, no telemetry, ever.</span></div>
+      </li>
+    </ul>
+    <p class="fineprint" style="margin-top:22px">Full disclosure in the README: after setup, any process running
+      under an admin account on the machine can toggle sleep prevention without a password. It cannot gain
+      root or run anything else — see the
+      <a href="https://github.com/yairixStudio/shutlid#security-model">security model</a> for the complete
+      threat statement.</p>
+  </div>
+</section>
 
-  <h2>Install</h2>
-  <ol>
-    <li>Download the DMG from <a href="https://github.com/yairixStudio/shutlid/releases">Releases</a>, or build it with <code>scripts/build.sh</code>.</li>
-    <li>Drag <code>Shutlid.app</code> to <code>/Applications</code>.</li>
-    <li>Open it and choose <strong>Turn On</strong>. macOS asks for your administrator password once, and never again.</li>
-  </ol>
-  <p>Requires macOS 14 or later on Apple Silicon. Uninstall with
-  <code>scripts/uninstall.sh</code>, which restores every setting it touched.</p>
+<section class="alt" id="faq">
+  <div class="wrap">
+    <p class="kicker">FAQ</p>
+    <h2>Questions worth asking before you install anything</h2>
+    <div>
+      <details class="faq">
+        <summary>Does Shutlid keep a MacBook awake with the lid closed, on battery, with no external monitor?</summary>
+        <p>That is the scenario it is built for. It sets the same power-management flag the kernel checks before
+          any sleep, so no display or keyboard needs to be attached. The on/off toggle has been verified
+          against the real kernel flag on an M4 Pro; the physical closed-lid battery test is tracked in
+          <a href="https://github.com/yairixStudio/shutlid/blob/main/MANUAL_TESTING.md">MANUAL_TESTING.md</a>
+          and reported there as it is run.</p>
+      </details>
+      <details class="faq">
+        <summary>Does Shutlid ask for my password every time?</summary>
+        <p>No. A one-time administrator authorization installs a sudo rule scoped to exactly two commands:
+          turn the flag on, turn it off. After that, the app and the CLI never see a password again.</p>
+      </details>
+      <details class="faq">
+        <summary>Is the underlying mechanism safe and reviewable?</summary>
+        <p>Yes. Every privileged call is Apple's own <code>pmset</code> binary, isolated in a single source
+          file. No custom code ever runs as root. The full investigation, including rejected approaches, is
+          public in <a href="https://github.com/yairixStudio/shutlid/blob/main/RESEARCH.md">RESEARCH.md</a>.</p>
+      </details>
+      <details class="faq">
+        <summary>Will this drain my battery or overheat my MacBook?</summary>
+        <p>A closed laptop in a bag cannot shed heat as well as an open one, and while keep-awake is on,
+          low-battery emergency sleep is disabled too. Auto-off is on by default (24 hours) as the safety net,
+          adjustable down to 1 hour or off entirely.</p>
+      </details>
+      <details class="faq">
+        <summary>Can an AI coding agent control Shutlid without a GUI?</summary>
+        <p>Yes. The CLI is the agent interface: <code>shutlid on</code>, <code>shutlid off</code> and
+          <code>shutlid status</code>, with stable exit codes and no interactive prompts after setup.</p>
+      </details>
+      <details class="faq">
+        <summary>How is this different from caffeinate or a virtual-display trick?</summary>
+        <p><code>caffeinate</code> and sleep assertions stop idle sleep but not the sleep macOS triggers when
+          the lid closes. A virtual display can fool clamshell mode but still requires AC power and stacks
+          extra machinery. Shutlid uses the one setting that vetoes lid-close sleep directly, with nothing
+          else running.</p>
+      </details>
+      <details class="faq">
+        <summary>What does Shutlid cost, and is it open source?</summary>
+        <p>Shutlid is free and open source under the MIT license. The full source, including the research
+          behind it, is on <a href="https://github.com/yairixStudio/shutlid">GitHub</a>.</p>
+      </details>
+    </div>
+  </div>
+</section>
 
-  <div class="note">Status: built and verified on a MacBook Pro (M4 Pro) running
-  macOS 27 beta, including the real on/off toggle of the kernel flag. The
-  physical closed-lid test on battery is documented in
-  <a href="https://github.com/yairixStudio/shutlid/blob/main/MANUAL_TESTING.md">MANUAL_TESTING.md</a>
-  and is reported there as it is run.</div>
+<section class="cta-band">
+  <div class="wrap">
+    <h2>Close the lid. Keep working.</h2>
+    <p>Free, open source, and built to disappear into the background.</p>
+    <div class="cta-row">
+      <a class="btn primary" href="https://github.com/yairixStudio/shutlid/releases">Download for macOS</a>
+      <a class="btn" href="https://github.com/yairixStudio/shutlid">Read the source</a>
+    </div>
+  </div>
+</section>
 
-  <footer>
-    <a href="https://github.com/yairixStudio/shutlid">GitHub</a>
-    <a href="https://github.com/yairixStudio/shutlid/blob/main/README.md">README</a>
-    <a href="https://github.com/yairixStudio/shutlid/blob/main/RESEARCH.md">Research</a>
-    <a href="https://github.com/yairixStudio/shutlid/blob/main/LICENSE">MIT License</a>
-    <span>© 2026 Yair Amsalem</span>
-  </footer>
-</main>
+<footer>
+  <div class="wrap">
+    <span>© 2026 Yair Amsalem · MIT License</span>
+    <div class="links">
+      <a href="https://github.com/yairixStudio/shutlid">GitHub</a>
+      <a href="https://github.com/yairixStudio/shutlid/blob/main/README.md">README</a>
+      <a href="https://github.com/yairixStudio/shutlid/blob/main/RESEARCH.md">Research</a>
+      <a href="https://github.com/yairixStudio/shutlid/blob/main/MANUAL_TESTING.md">Manual testing</a>
+      <a href="https://github.com/yairixStudio/shutlid/blob/main/LICENSE">License</a>
+    </div>
+  </div>
+</footer>
+
 </body>
 </html>
